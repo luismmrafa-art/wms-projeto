@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <title>WMS - Centro de Comando (Digital Twin)</title>
+    <style>
+        /* Estilos base da página e estruturação principal (cabeçalho e área de conteúdo) */
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; display: flex; flex-direction: column; align-items: center; padding: 20px; margin: 0;}
+        .cabecalho { background: #1d3557; color: white; padding: 15px; border-radius: 8px; width: 100%; max-width: 1000px; text-align: center; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .conteudo { display: flex; gap: 20px; width: 100%; max-width: 1000px; justify-content: center; align-items: flex-start;}
+
+        /* O Mapa Dinâmico - Define como a grelha do armazém é desenhada */
+        .mapa-container { overflow: auto; max-width: 700px; padding: 10px; background: #ddd; border-radius: 8px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); }
+        .mapa-armazem { display: grid; gap: 5px; transition: 0.3s; position: relative; } /* RELATIVE para o robô andar lá dentro respeitando os limites */
+        .celula { background: white; border: 1px dashed #aaa; display: flex; align-items: center; justify-content: center; font-size: 10px; border-radius: 4px; text-align: center; height: 60px; color: #666;}
+        .prateleira { background: #457b9d; color: white; font-weight: bold; cursor: pointer; border: 2px solid #1d3557; box-shadow: 2px 2px 5px rgba(0,0,0,0.2); }
+        
+        /* O NOSSO ROBÔ 🚜 - Elemento que flutua (absolute) por cima da grelha */
+        .agv { position: absolute; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; font-size: 30px; transition: all 0.3s linear; z-index: 10; pointer-events: none; filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.4));}
+
+        /* Painéis Laterais - Controlos e botões de ação do Gestor */
+        .painel-lateral { display: flex; flex-direction: column; gap: 20px; width: 300px; flex-shrink: 0;}
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h3 { margin-top: 0; font-size: 16px; color: #1d3557; border-bottom: 2px solid #eee; padding-bottom: 5px; }
+        .campo { margin-bottom: 10px; }
+        label { display: block; font-size: 12px; font-weight: bold; margin-bottom: 3px; color: #333;}
+        input { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        button { width: 100%; padding: 10px; border: none; border-radius: 4px; color: white; font-weight: bold; cursor: pointer; margin-top: 5px; transition: 0.2s;}
+        button:hover { opacity: 0.9; }
+        .btn-produto { background: #2a9d8f; }
+        .btn-prateleira { background: #1d3557; }
+        .btn-robo { background: #e9c46a; color: #1d3557; margin-top: 15px;}
+
+        /* Modal - Janela sobreposta que aparece ao clicar numa prateleira */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; justify-content: center; align-items: center; z-index: 1000; backdrop-filter: blur(2px);}
+        .modal-box { background: white; padding: 20px; border-radius: 8px; width: 320px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 15px;}
+        .modal-header h3 { margin: 0; border: none; padding: 0; font-size: 18px;}
+        .btn-fechar { background: none; color: #e63946; font-size: 20px; border: none; cursor: pointer; padding: 0; width: auto; margin:0;}
+        .lista-produtos { max-height: 180px; overflow-y: auto; margin-bottom: 15px; padding-right: 5px;}
+        .item-produto { display: flex; justify-content: space-between; align-items: center; background: #f8f9fa; padding: 10px; margin-bottom: 5px; border-radius: 4px; border: 1px solid #e9ecef; font-size: 14px;}
+        .btn-lixo { background: #e63946; padding: 6px 10px; font-size: 12px; margin: 0; width: auto; border-radius: 4px; }
+        .btn-destruir { background: #e63946; margin-top: 10px; font-size: 14px;}
+        
+        .btn-sair-topo { background: #e63946; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; float: right; margin-top: -30px; font-weight: bold;}
+    </style>
+</head>
+<body>
+
+    <div class="cabecalho">
+        <h1>📦 WMS - Centro de Comando Lógico</h1>
+        <button class="btn-sair-topo" onclick="sair()">Sair do Sistema</button>
+    </div>
+
+    <div class="conteudo">
+        <div class="mapa-container">
+            <div id="mapa" class="mapa-armazem">
+                <div id="agv" class="agv">🚜</div>
+            </div>
+        </div>
+
+        <div class="painel-lateral">
+            <div class="card">
+                <h3>📏 Expandir Chão</h3>
+                <div style="display:flex; gap:5px">
+                    <div class="campo"><label>Max X:</label><input type="number" id="dimX" value="7" min="1" onchange="guardarNovoTamanho()"></div>
+                    <div class="campo"><label>Max Y:</label><input type="number" id="dimY" value="4" min="1" onchange="guardarNovoTamanho()"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>🔨 Construir Prateleira</h3>
+                <div style="display:flex; gap:5px">
+                    <div class="campo"><label>X:</label><input type="number" id="platX" value="1" min="1"></div>
+                    <div class="campo"><label>Y:</label><input type="number" id="platY" value="1" min="1"></div>
+                    <div class="campo"><label>Níveis:</label><input type="number" id="platNivel" value="3" min="0"></div>
+                </div>
+                <button class="btn-prateleira" onclick="criarPrateleira()">CRIAR ESTRUTURA</button>
+            </div>
+
+            <div class="card">
+                <h3>📥 Entrada de Produto</h3>
+                <div class="campo"><label>Nome / SKU:</label><input type="text" id="prodNome" placeholder="Ex: Motor V8"></div>
+                <div style="display:flex; gap:5px">
+                    <div class="campo"><label>Ir ao X:</label><input type="number" id="prodX" value="2" min="1"></div>
+                    <div class="campo"><label>Ir ao Y:</label><input type="number" id="prodY" value="1" min="1"></div>
+                    <div class="campo"><label>Nível:</label><input type="number" id="prodNivel" value="1" min="0"></div>
+                </div>
+                <button class="btn-produto" onclick="guardarProduto()">ARRUMAR NO STOCK</button>
+            </div>
+            <div class="card">
+                <h3>🛒 Simulador ERP (Múltiplos Itens)</h3>
+                <div class="campo" style="display: flex; gap: 5px;">
+                    <input type="text" id="simuProduto" placeholder="Produto (ex: pc)" style="flex: 2;">
+                    <input type="number" id="simuQtd" placeholder="Qtd" value="1" min="1" style="flex: 1;">
+                    <button onclick="adicionarAoCarrinho()" style="background:#2a9d8f; color:white; border:none; border-radius:4px; cursor:pointer; width: 40px;"><b>+</b></button>
+                </div>
+                <ul id="listaCarrinho" style="list-style:none; padding:0; margin: 15px 0; font-size: 14px; color: #333; font-weight: bold;"></ul>
+                <button onclick="enviarOrdem()" class="btn-produto" style="background:#e63946; width:100%;">GERAR ORDEM DE PICKING</button>
+            </div>
+            <div class="card">
+                <h3>📂 Importar Planta (JSON)</h3>
+                <input type="file" id="ficheiroJSON" accept=".json" style="margin-bottom: 10px; width: 100%; padding: 5px;">
+                <button onclick="importarMapa()" class="btn-produto" style="background:#457b9d; width:100%;">CONSTRUIR MAPA</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card" style="margin-top: 20px; width: 100%;">
+        <h3>📊 Últimas Movimentações / Encomendas</h3>
+        
+        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+            <thead>
+                <tr style="background-color: #f8f9fa; border-bottom: 2px solid #ddd;">
+                    <th style="padding: 10px;">Nº</th>
+                    <th style="padding: 10px;">Data</th>
+                    <th style="padding: 10px;">Cliente</th>
+                    <th style="padding: 10px;">Artigo</th>
+                    <th style="padding: 10px;">Status</th>
+                </tr>
+            </thead>
+            
+            <tbody id="listaVendas">
+                </tbody>
+            
+        </table>
+    </div>
+
+    <div id="modalDetalhes" class="modal-overlay">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3 id="modalTitulo">Prateleira</h3>
+                <button class="btn-fechar" onclick="fecharModal()">✖</button>
+            </div>
+            <div id="modalConteudo" class="lista-produtos"></div>
+            <button id="btnDestruir" class="btn-destruir" onclick="">💥 DESTRUIR ESTRUTURA</button>
+            
+            <button id="btnChamarRobo" class="btn-robo" onclick="">🚜 CHAMAR AGV PARA AQUI</button>
+        </div>
+    </div>
+
+    <script>
+        // --- SEGURANÇA E LOGIN ---
+        // Impede que Operadores ou Clientes acedam ao painel do Gestor
+        function verificarSeguranca() {
+            const cargo = sessionStorage.getItem('cargoUtilizador');
+            if (cargo !== 'Gestor') {
+                alert("⚠️ Acesso Negado! Esta área é exclusiva para o Patrão/Gestor.");
+                window.location.href = 'login.html';
+            }
+        }
+
+        // Limpa a sessão e desloga o utilizador
+        function sair() {
+            sessionStorage.clear();
+            window.location.href = 'login.html';
+        }
+
+        // --- VARIÁVEIS GLOBAIS DO ROBÔ ---
+        // Mantêm o registo de onde o AGV está fisicamente e se está a meio de um trabalho
+        // 🚨 O ROBÔ AGORA NASCE ONDE ESTAVA NA MEMÓRIA (Se não houver memória, nasce no 1,1)
+        let roboX = parseInt(sessionStorage.getItem('roboX')) || 1;
+        let roboY = parseInt(sessionStorage.getItem('roboY')) || 1;
+        let roboOcupado = false; 
+
+        // --- 1. O MOTOR GRÁFICO ---
+        // Consulta a API e desenha a grelha, as prateleiras e os produtos com base no ArmazemID
+        async function carregarMapa() {
+            const meuArmazem = sessionStorage.getItem('armazemID');
+            const resInv = await fetch(`/api/inventario?armazemID=${meuArmazem}`);
+            const { prateleiras, produtos } = await resInv.json();
+            
+            // Tenta obter os limites do mapa na base de dados
+            let config = { largura: 7, comprimento: 4 };
+            try { const resConf = await fetch('/api/config/tamanho'); if (resConf.ok) config = await resConf.json(); } catch(e) {}
+
+            const divMapa = document.getElementById('mapa');
+            const roboHTML = divMapa.querySelector('#agv'); 
+
+            // Calcula o tamanho máximo do armazém com base nos dados ou nas configurações
+            let maxX = prateleiras.reduce((max, p) => Math.max(max, p.PosX), config.largura || 7);
+            let maxY = prateleiras.reduce((max, p) => Math.max(max, p.PosY), config.comprimento || 4);
+
+            document.getElementById('dimX').value = maxX;
+            document.getElementById('dimY').value = maxY;
+
+            // Aplica as colunas e linhas dinamicamente no CSS
+            divMapa.style.gridTemplateColumns = `repeat(${maxX}, 60px)`;
+            divMapa.style.gridTemplateRows = `repeat(${maxY}, 60px)`;
+            divMapa.innerHTML = '';
+            divMapa.appendChild(roboHTML); 
+
+            // Desenha cada célula (quadrado) do mapa
+            for (let y = 1; y <= maxY; y++) {
+                for (let x = 1; x <= maxX; x++) {
+                    const celula = document.createElement('div');
+                    celula.className = 'celula';
+                    
+                    celula.dataset.x = x;
+                    celula.dataset.y = y;
+                    
+                    const plat = prateleiras.find(p => p.PosX === x && p.PosY === y);
+
+                    // Se existir uma prateleira nestas coordenadas, pinta-a e adiciona o evento de clique (Modal)
+                    if (plat) {
+                        celula.classList.add('prateleira');
+                        const prods = produtos.filter(p => p.PrateleiraID === plat.ID);
+                        let aviso = prods.length > 0 ? `<br>📦 ${prods.length}` : '';
+                        celula.innerHTML = `P<br><small>(${x},${y})</small>${aviso}`;
+                        celula.onclick = () => abrirModal(plat, prods);
+                    } else {
+                        celula.innerText = `${x},${y}`;
+                    }
+                    divMapa.appendChild(celula);
+                }
+            }
+            desenharRobo(); 
+        }
+
+        // --- 2. O CÉREBRO DE NAVEGAÇÃO DO ROBÔ ---
+        // Algoritmo de "Pathfinding" (BFS) para descobrir o caminho mais curto desviando das prateleiras
+        async function moverRobo(alvoX, alvoY) {
+            if (roboOcupado) return alert("🚜 O robô já está em movimento!");
+            roboOcupado = true;
+
+            // Recolhe todas as posições bloqueadas (onde existem prateleiras)
+            const obstaculos = [];
+            document.querySelectorAll('.prateleira').forEach(p => {
+                obstaculos.push({ x: parseInt(p.dataset.x), y: parseInt(p.dataset.y) });
+            });
+
+            const maxX = parseInt(document.getElementById('dimX').value);
+            const maxY = parseInt(document.getElementById('dimY').value);
+
+            // Inicia o algoritmo de procura de caminho
+            let fila = [{ x: roboX, y: roboY, caminho: [] }];
+            let visitados = new Set([`${roboX},${roboY}`]);
+            let caminhoFinal = null;
+
+            while (fila.length > 0) {
+                let atual = fila.shift();
+
+                // Se o robô chegar a 1 quadrícula de distância do alvo, considera a viagem bem-sucedida
+                let distanciaParaAlvo = Math.abs(atual.x - alvoX) + Math.abs(atual.y - alvoY);
+                if (distanciaParaAlvo === 1 || (atual.x === alvoX && atual.y === alvoY && !obstaculos.some(o=>o.x===alvoX && o.y===alvoY))) {
+                    caminhoFinal = atual.caminho;
+                    break;
+                }
+
+                // Tenta mover-se para as 4 direções cardeais (Cima, Baixo, Esquerda, Direita)
+                const movimentos = [ {dx:0,dy:-1}, {dx:0,dy:1}, {dx:-1,dy:0}, {dx:1,dy:0} ];
+                for (let mov of movimentos) {
+                    let nx = atual.x + mov.dx;
+                    let ny = atual.y + mov.dy;
+                    
+                    // Valida se o movimento é dentro do mapa e se não bate numa prateleira
+                    if (nx >= 1 && nx <= maxX && ny >= 1 && ny <= maxY) {
+                        let chave = `${nx},${ny}`;
+                        let baterPrateleira = obstaculos.some(o => o.x === nx && o.y === ny);
+                        
+                        if (!visitados.has(chave) && !baterPrateleira) {
+                            visitados.add(chave);
+                            fila.push({ x: nx, y: ny, caminho: [...atual.caminho, {x: nx, y: ny}] });
+                        }
+                    }
+                }
+            }
+
+            // Se encontrou caminho, executa a animação passo a passo
+            if (caminhoFinal) {
+                for (let passo of caminhoFinal) {
+                    roboX = passo.x;
+                    roboY = passo.y;
+                    
+                    sessionStorage.setItem('roboX', roboX);
+                    sessionStorage.setItem('roboY', roboY);
+
+                    desenharRobo();
+                    await new Promise(r => setTimeout(r, 300)); // Aguarda 300ms entre cada salto
+                }
+                setTimeout(() => alert(`🚜 Operação Concluída na Posição X:${alvoX}, Y:${alvoY}!`), 100);
+            } else {
+                alert("🚨 Bip Bop! Caminho bloqueado. Não consigo chegar a essa prateleira!");
+            }
+            
+            roboOcupado = false;
+            fecharModal();
+        }
+
+        // Aplica a posição matemática aos pixels reais no ecrã
+        function desenharRobo() {
+            const robo = document.getElementById('agv');
+            robo.style.left = ((roboX - 1) * 65 + 10) + 'px'; 
+            robo.style.top = ((roboY - 1) * 65 + 10) + 'px';
+        }
+
+        // --- AS FUNÇÕES DE DADOS DO ARMÁZEM ---
+        
+        // Guarda na BD o novo tamanho da grelha de solo
+        async function guardarNovoTamanho() {
+            const largura = document.getElementById('dimX').value; const comprimento = document.getElementById('dimY').value;
+            try { await fetch('/api/config/tamanho', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ largura, comprimento }) }); } catch(e){}
+            carregarMapa();
+        }
+
+        async function criarPrateleira() {
+            const posX = parseInt(document.getElementById('platX').value); 
+            const posY = parseInt(document.getElementById('platY').value); 
+            const niveis = parseInt(document.getElementById('platNivel').value);
+            
+            // 🔑 Vai buscar a chave do armazém
+            const armazemID = sessionStorage.getItem('armazemID');
+
+            const res = await fetch('/api/prateleiras/nova', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                // 🔑 Envia a chave ao servidor
+                body: JSON.stringify({ posX, posY, niveis, armazemID }) 
+            });
+            
+            if(res.ok) {
+                carregarMapa();
+            } else {
+                const erro = await res.json();
+                alert("❌ Erro ao criar: " + (erro.erro || "Falha no servidor"));
+            }
+        }
+
+        async function guardarProduto() {
+            const nome = document.getElementById('prodNome').value; 
+            const posX = parseInt(document.getElementById('prodX').value); 
+            const posY = parseInt(document.getElementById('prodY').value); 
+            const nivel = parseInt(document.getElementById('prodNivel').value);
+            
+            // 🔑 1. O código vai buscar a chave ao bolso do browser
+            const armazemID = sessionStorage.getItem('armazemID');
+
+            if (!nome) return alert("Escreve o nome do produto!");
+            
+            const res = await fetch('/api/produtos/novo', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                // 🔑 2. A chave é enviada dentro deste pacote para o servidor!
+                body: JSON.stringify({ nome, posX, posY, nivel, armazemID }) 
+            });
+            
+            if(res.ok) {
+                document.getElementById('prodNome').value = '';
+                carregarMapa();
+                moverRobo(posX, posY); 
+            } else { 
+                const erro = await res.json();
+                alert("❌ Erro: " + (erro.erro || "Falha ao guardar.")); 
+            }
+        }
+
+        // Preenche e exibe a janela flutuante quando se clica numa prateleira
+        function abrirModal(plat, prods) {
+            document.getElementById('modalTitulo').innerText = `X:${plat.PosX} Y:${plat.PosY} | Altura: ${plat.Niveis}`;
+            const divConteudo = document.getElementById('modalConteudo');
+            divConteudo.innerHTML = prods.length===0 ? '<p>Vazio</p>' : prods.map(p => `<div class="item-produto"><b>Nv${p.Nivel}:</b> ${p.Nome} <button class="btn-lixo" onclick="apagarProduto(${p.ID})">🗑️</button></div>`).join('');
+            
+            document.getElementById('btnDestruir').onclick = () => apagarPrateleira(plat.ID);
+            document.getElementById('btnChamarRobo').onclick = () => moverRobo(plat.PosX, plat.PosY);
+            
+            document.getElementById('modalDetalhes').style.display = 'flex';
+        }
+
+        // Oculta a janela flutuante
+        function fecharModal() { document.getElementById('modalDetalhes').style.display = 'none'; }
+        
+        // Chamadas destrutivas à API (Apagar produto e prateleira com verificação)
+        async function apagarProduto(id) { if(confirm("Remover?")) { await fetch(`/api/produtos/${id}`, { method: 'DELETE' }); fecharModal(); carregarMapa(); } }
+        async function apagarPrateleira(id) { if(confirm("Destruir?")) { const res = await fetch(`/api/prateleiras/${id}`, { method: 'DELETE' }); if(res.ok){ fecharModal(); carregarMapa(); } else { alert("Não podes apagar prateleiras com produtos!"); } } }
+
+        // --- 🌟 A NOVA FUNÇÃO DAS VENDAS 🌟 ---
+        // Vai buscar o resumo ao servidor e pinta a tabela com cores diferentes por estado
+        async function carregarVendas() {
+    try {
+        const armazemID = sessionStorage.getItem('armazemID');
+        const res = await fetch(`/api/gestor/encomendas?armazemID=${armazemID}`);
+        const vendas = await res.json();
+        
+        // 🚨 1. ENCONTRAR A TABELA NO HTML (Verifica se o ID no teu HTML é mesmo 'listaVendas')
+        const tbody = document.getElementById('listaVendas'); 
+        
+        // 🚨 2. LIMPAR A TABELA (Para não duplicar as compras a cada 5 segundos)
+        tbody.innerHTML = ''; 
+
+        if (vendas.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 15px; color: #666;">Ainda não há vendas registadas.</td></tr>';
+            return;
+        }
+
+        vendas.forEach(v => {
+            const dataFormatada = new Date(v.Data).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' });
+            
+            // Semáforo de cores para ajudar visualmente o gestor
+            let corEstado = '#666';
+            if (v.Estado === 'Pendente') corEstado = '#e63946'; 
+            else if (v.Estado === 'Em Picking') corEstado = '#e9c46a'; 
+            else if (v.Estado === 'Expedida') corEstado = '#2a9d8f'; 
+
+            tbody.innerHTML += `
+                <tr style="border-bottom: 1px solid #eee;">
+                    <td style="padding: 10px; font-weight: bold; color: #1d3557;">#${v.ID}</td>
+                    <td style="padding: 10px; color: #555;">${dataFormatada}</td>
+                    <td style="padding: 10px;">${v.Cliente}</td>
+                    <td style="padding: 10px;"><b>${v.ProdutoNome}</b></td>
+                    <td style="padding: 10px;">
+                        <span style="background: ${corEstado}; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight:bold;">
+                            ${v.Estado.toUpperCase()}
+                        </span>
+                    </td>
+                </tr>
+            `;
+        });
+    } catch (erro) {
+        console.log("Erro ao carregar tabela de vendas:", erro);
+    }
+}
+
+
+        let carrinhoDeCompras = [];
+
+        function adicionarAoCarrinho() {
+            const nome = document.getElementById('simuProduto').value;
+            const qtd = parseInt(document.getElementById('simuQtd').value);
+            
+            if(!nome || qtd < 1) return;
+
+            // Guarda na memória
+            carrinhoDeCompras.push({ nome, qtd });
+            
+            // Desenha no ecrã para o Gestor ver
+            document.getElementById('listaCarrinho').innerHTML += `<li style="margin-bottom: 5px;">✔️ ${qtd}x ${nome}</li>`;
+            
+            // Limpa a caixa de texto para o próximo produto
+            document.getElementById('simuProduto').value = '';
+            document.getElementById('simuQtd').value = '1';
+        }
+
+        async function enviarOrdem() {
+            if(carrinhoDeCompras.length === 0) return alert("O carrinho está vazio!");
+            
+            const armazemID = sessionStorage.getItem('armazemID');
+
+            const res = await fetch('/api/encomendas/carrinho', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                // Enviamos o carrinho inteiro num único pacote!
+                body: JSON.stringify({ carrinho: carrinhoDeCompras, armazemID })
+            });
+
+            if(res.ok) {
+                carrinhoDeCompras = []; // Esvazia o carrinho da memória
+                document.getElementById('listaCarrinho').innerHTML = ''; // Limpa o ecrã
+                carregarVendas(); // Atualiza a tabela logo a seguir
+                alert("🎉 Encomenda Múltipla Enviada para o Armazém!");
+            } else {
+                const erro = await res.json();
+                alert("Erro: " + erro.erro);
+            }
+        }
+
+        async function importarMapa() {
+            const input = document.getElementById('ficheiroJSON');
+            
+            // 1. Verifica se a pessoa escolheu mesmo um ficheiro
+            if (input.files.length === 0) return alert('⚠️ Primeiro tens de escolher um ficheiro .json!');
+
+            const ficheiro = input.files[0];
+            const reader = new FileReader();
+
+            // 2. Quando o ficheiro for lido pela memória do browser, faz isto:
+            reader.onload = async function(evento) {
+                try {
+                    // Transforma o texto do ficheiro num formato que o JS entenda
+                    const prateleirasImportadas = JSON.parse(evento.target.result);
+                    const armazemID = sessionStorage.getItem('armazemID');
+
+                    // 3. Envia o pacote para o Servidor
+                    const res = await fetch('/api/armazem/importar', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ prateleiras: prateleirasImportadas, armazemID })
+                    });
+
+                    if (res.ok) {
+                        alert('🏗️ Mapa importado e construído com sucesso!');
+                        document.getElementById('ficheiroJSON').value = ''; // Limpa o botão
+                        carregarMapa(); // Desenha as novas prateleiras na hora!
+                    } else {
+                        const erro = await res.json();
+                        alert('❌ Erro: ' + erro.erro);
+                    }
+                } catch (erro) {
+                    alert('❌ Erro a ler o ficheiro! Confirma se é um JSON válido.');
+                }
+            };
+
+            // Dá a ordem para começar a ler o ficheiro
+            reader.readAsText(ficheiro);
+        }
+
+                // 📡 RADAR DO ROBÔ (A Magia em Tempo Real)
+        let ultimoTempoRobo = Date.now();
+        
+        setInterval(async () => {
+            const armazemID = sessionStorage.getItem('armazemID');
+            if (!armazemID) return; // Se não houver login, o radar não liga
+
+            try {
+                const res = await fetch(`/api/robo/radar?armazemID=${armazemID}`);
+                const dados = await res.json();
+                
+                // Se houver um movimento novo (com uma data maior que a última que o site viu)
+                if (dados && dados.timestamp > ultimoTempoRobo) {
+                    ultimoTempoRobo = dados.timestamp; // Guarda a data da nova ação
+                    
+                    // 🤖 A AÇÃO FANTASMA!
+                    moverRobo(dados.posX, dados.posY); // O Robô anda!
+                    carregarVendas(); // A Tabela atualiza e fica verde (Expedida)!
+                    carregarMapa(); // A caixa desaparece da prateleira ao vivo!
+                }
+            } catch(erro) {
+                // Ignora erros silenciosamente para não encher a consola
+            }
+        }, 2000); // 2000 milissegundos = Pergunta ao servidor de 2 em 2 segundos
+
+
+        // --- ARRANQUE DO SISTEMA ---
+        verificarSeguranca(); // Garante que só o Gestor entra
+        carregarMapa();       // Desenha o Armazém e as prateleiras
+        carregarVendas();     // 🌟 Carrega a tabela de vendas 🌟
+        setInterval(carregarVendas, 5000); // 🌟 Atualiza as vendas a cada 5 segundos para o Gestor ter feedback live 🌟
+    </script>
+</body>
+</html>

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WMS - Criar Conta</title>
+    <style>
+        /* Estilos base para centrar a caixa no meio do ecrã e definir cores */
+        body { font-family: 'Segoe UI', sans-serif; background: #1d3557; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; color: #333;}
+        .caixa-login { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 100%; max-width: 350px; text-align: center; }
+        .caixa-login h1 { color: #1d3557; margin-top: 0; font-size: 24px;}
+        .campo { margin-bottom: 20px; text-align: left; }
+        .campo label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 14px;}
+        .campo input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; font-size: 16px;}
+        .btn-entrar { background: #2a9d8f; color: white; border: none; width: 100%; padding: 12px; font-size: 16px; font-weight: bold; border-radius: 5px; cursor: pointer; transition: 0.3s;}
+        .btn-entrar:hover { background: #21867a; }
+        .rodape { margin-top: 20px; font-size: 14px; color: #777;}
+        .rodape a { color: #1d3557; font-weight: bold; text-decoration: none; }
+        .rodape a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+
+    <div class="caixa-login">
+        <h1>📦 WMS Store</h1>
+        <p style="color:#666; margin-bottom: 30px; font-size: 14px;">Cria a tua conta de Cliente</p>
+        
+        <div class="campo">
+            <label>O teu Nome:</label>
+            <input type="text" id="inputNome" placeholder="Ex: João Silva">
+        </div>
+
+        <div class="campo">
+            <label>Email:</label>
+            <input type="email" id="inputEmail" placeholder="ex: joao@email.com">
+        </div>
+        
+        <div class="campo">
+            <label>Password:</label>
+            <input type="password" id="inputSenha" placeholder="Cria uma password forte">
+        </div>
+
+        <button class="btn-entrar" onclick="fazerRegisto()">CRIAR CONTA</button>
+        
+        <div class="rodape">
+            Já tens conta? <a href="login.html">Faz Login aqui</a>
+        </div>
+    </div>
+
+    <script>
+        // Função principal que envia os dados de registo para o servidor
+        async function fazerRegisto() {
+            // Vai buscar os valores que o utilizador escreveu nos campos
+            const nome = document.getElementById('inputNome').value;
+            const email = document.getElementById('inputEmail').value;
+            const senha = document.getElementById('inputSenha').value;
+
+            // Segurança básica: Impede o envio se faltar algum dado
+            if(!nome || !email || !senha) return alert("Preenche todos os campos!");
+
+            try {
+                // Faz um pedido POST à API com os dados em formato JSON
+                const res = await fetch('/api/registo', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ nome, email, senha })
+                });
+
+                // Converte a resposta do servidor para ler a mensagem ou o erro
+                const data = await res.json();
+
+                if (res.ok) {
+                    // Se o registo correr bem, avisa o utilizador e reencaminha-o para o Login
+                    alert("✅ " + data.mensagem);
+                    window.location.href = 'login.html'; // Manda o cliente para o Login!
+                } else {
+                    // Se o servidor der erro (ex: email já existe), mostra o erro
+                    alert("❌ " + data.erro);
+                }
+            } catch (erro) {
+                // Caso o servidor esteja desligado ou haja um problema de ligação
+                alert("Erro de rede. Verifica se o servidor está ligado.");
+            }
+        }
+    </script>
+</body>
+</html>
