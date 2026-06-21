@@ -280,44 +280,6 @@ app.post('/api/registo', async (req, res) => {
 });
 
 
-// 🛍️ ROTA DA LOJA: O cliente clica em "Comprar" (ATUALIZADA)
-app.post('/api/loja/comprar', async (req, res) => {
-    try {
-        const { clienteEmail, produtoNome } = req.body; 
-
-        // Recupera o ID do cliente com base no email fornecido
-        const [clientes] = await pool.query('SELECT ID FROM Usuarios WHERE Email = ?', [clienteEmail]);
-        if (clientes.length === 0) return res.status(400).json({ erro: 'Cliente não encontrado' });
-        const clienteID = clientes[0].ID;
-
-        // Cria a encomenda com estado "Pendente"
-        await pool.query('INSERT INTO Encomendas (ClienteID, ProdutoNome, Estado) VALUES (?, ?, "Pendente")', [clienteID, produtoNome]);
-        
-        res.status(200).json({ mensagem: `Boa! Compraste um ${produtoNome}. O armazém já foi avisado!` });
-    } catch (erro) {
-        res.status(500).json({ erro: 'Erro ao processar compra' });
-    }
-});
-
-// 👷 ROTA DO OPERADOR: Buscar tarefas pendentes
-app.get('/api/operador/tarefas', async (req, res) => {
-    try {
-        // Retorna as encomendas pendentes agregadas aos respetivos produtos e coordenadas de localização
-        const sql = `
-            SELECT e.ID as EncomendaID, e.ProdutoNome, p.PosX, p.PosY, p.Nivel, u.Nome as Cliente
-            FROM Encomendas e
-            JOIN Produtos p ON e.ProdutoNome = p.Nome
-            JOIN Usuarios u ON e.ClienteID = u.ID
-            WHERE e.Estado = 'Pendente'
-            GROUP BY e.ID
-        `;
-        const [tarefas] = await pool.query(sql);
-        res.json(tarefas);
-    } catch (erro) {
-        res.status(500).json({ erro: 'Erro ao carregar tarefas' });
-    }
-});
-
 
 // 🛒 ROTA DA LOJA: Mostrar os produtos que existem no armazém
 app.get('/api/loja/produtos', async (req, res) => {
@@ -400,83 +362,100 @@ app.post('/api/encomendas/simular', async (req, res) => {
 
 // 🛒 SIMULADOR: Receber um Carrinho de Compras (COM VALIDAÇÃO DE STOCK 🛡️)
 app.post('/api/encomendas/carrinho', async (req, res) => {
+    const conn = await pool.getConnection();
     try {
         const { carrinho, armazemID } = req.body;
-        
-        // 🚨 1. FASE DE VALIDAÇÃO (O "Olheiro" do Stock)
-        // O servidor vai ver prateleira a prateleira antes de aceitar a encomenda
+
+        await conn.beginTransaction();
+
         for (let item of carrinho) {
-            const [stock] = await pool.query(
-                'SELECT COUNT(*) as total FROM Produtos WHERE Nome = ? AND ArmazemID = ?', 
+            const [stock] = await conn.query(
+                'SELECT COUNT(*) as total FROM Produtos WHERE Nome = ? AND ArmazemID = ? FOR UPDATE',
                 [item.nome, armazemID]
             );
-            
             if (stock[0].total < item.qtd) {
-                // Aborta TUDO imediatamente e avisa o ecrã!
-                return res.status(400).json({ 
-                    erro: `Operação Bloqueada! Tentaste encomendar ${item.qtd}x "${item.nome}", mas só tens ${stock[0].total} em stock físico no armazém.` 
+                await conn.rollback();
+                return res.status(400).json({
+                    erro: `Operação Bloqueada! Tentaste encomendar ${item.qtd}x "${item.nome}", mas só tens ${stock[0].total} em stock físico no armazém.`
                 });
             }
         }
 
-        // 🟢 2. FASE DE INSERÇÃO (Se chegou aqui, é porque há stock de tudo!)
-        const [usuarios] = await pool.query("SELECT ID FROM Usuarios WHERE ArmazemID = ? LIMIT 1", [armazemID]);
-        const clienteID = usuarios.length > 0 ? usuarios[0].ID : 1; 
+        const [usuarios] = await conn.query("SELECT ID FROM Usuarios WHERE ArmazemID = ? LIMIT 1", [armazemID]);
+        const clienteID = usuarios.length > 0 ? usuarios[0].ID : 1;
 
         for (let item of carrinho) {
-            await pool.query(
-                'INSERT INTO Encomendas (ClienteID, ProdutoNome, Quantidade, Estado, Data, ArmazemID) VALUES (?, ?, ?, "Pendente", NOW(), ?)', 
+            await conn.query(
+                'INSERT INTO Encomendas (ClienteID, ProdutoNome, Quantidade, Estado, Data, ArmazemID) VALUES (?, ?, ?, "Pendente", NOW(), ?)',
                 [clienteID, item.nome, item.qtd, armazemID]
             );
         }
+
+        await conn.commit();
         res.status(201).json({ mensagem: 'Carrinho processado e validado com sucesso!' });
     } catch (erro) {
+        await conn.rollback();
         console.error(erro);
         res.status(500).json({ erro: 'Erro ao gerar ordens' });
+    } finally {
+        conn.release();
     }
 });
 
 // 👷 BAIXA DE STOCK (Agora controla o Robô!)
 app.post('/api/operador/concluir', async (req, res) => {
+    const conn = await pool.getConnection();
     try {
         const { encomendaId } = req.body;
 
-        const [enc] = await pool.query('SELECT ProdutoNome, Quantidade, ArmazemID FROM Encomendas WHERE ID = ?', [encomendaId]);
-        if (enc.length === 0) return res.status(404).json({ erro: 'Encomenda não encontrada' });
-        
+        await conn.beginTransaction();
+
+        const [enc] = await conn.query('SELECT ProdutoNome, Quantidade, ArmazemID FROM Encomendas WHERE ID = ? FOR UPDATE', [encomendaId]);
+        if (enc.length === 0) {
+            await conn.rollback();
+            return res.status(404).json({ erro: 'Encomenda não encontrada' });
+        }
+
         const { ProdutoNome, Quantidade, ArmazemID } = enc[0];
 
-        // 🚨 NOVO: ANTES de apagar, descobre onde a caixa está!
-        const [posicao] = await pool.query(`
-            SELECT p.PosX, p.PosY 
+        const [posicao] = await conn.query(`
+            SELECT p.PosX, p.PosY
             FROM Produtos prod
             JOIN Prateleiras p ON prod.PrateleiraID = p.ID
             WHERE prod.Nome = ? AND prod.ArmazemID = ? LIMIT 1
         `, [ProdutoNome, ArmazemID]);
 
-        // Se encontrou a caixa, regista no Radar a hora exata e as coordenadas!
+        const [stock] = await conn.query(
+            'SELECT COUNT(*) as total FROM Produtos WHERE Nome = ? AND ArmazemID = ? FOR UPDATE',
+            [ProdutoNome, ArmazemID]
+        );
+
+        if (stock[0].total < Quantidade) {
+            await conn.query('UPDATE Encomendas SET Estado = "Rutura de Stock" WHERE ID = ?', [encomendaId]);
+            await conn.commit();
+            return res.status(400).json({ erro: `RUTURA! A encomenda pede ${Quantidade}x ${ProdutoNome}, mas só tens ${stock[0].total}.` });
+        }
+
+        await conn.query(`DELETE FROM Produtos WHERE Nome = ? AND ArmazemID = ? LIMIT ${Number(Quantidade)}`, [ProdutoNome, ArmazemID]);
+        await conn.query('UPDATE Encomendas SET Estado = "Expedida" WHERE ID = ?', [encomendaId]);
+
+        await conn.commit();
+
         if (posicao.length > 0) {
             radarRobo[ArmazemID] = {
                 posX: posicao[0].PosX,
                 posY: posicao[0].PosY,
-                timestamp: Date.now() // Regista a hora exata (milissegundos)
+                timestamp: Date.now()
             };
         }
 
-        const [stock] = await pool.query('SELECT COUNT(*) as total FROM Produtos WHERE Nome = ? AND ArmazemID = ?', [ProdutoNome, ArmazemID]);
-        
-        if (stock[0].total < Quantidade) {
-            await pool.query('UPDATE Encomendas SET Estado = "Rutura de Stock" WHERE ID = ?', [encomendaId]);
-            return res.status(400).json({ erro: `RUTURA! A encomenda pede ${Quantidade}x ${ProdutoNome}, mas só tens ${stock[0].total}.` });
-        }
-
-        await pool.query(`DELETE FROM Produtos WHERE Nome = ? AND ArmazemID = ? LIMIT ${Number(Quantidade)}`, [ProdutoNome, ArmazemID]);
-        await pool.query('UPDATE Encomendas SET Estado = "Expedida" WHERE ID = ?', [encomendaId]);
-        
         res.json({ mensagem: 'Recolha confirmada com sucesso!' });
     } catch (erro) {
+        await conn.rollback();
         console.error(erro);
         res.status(500).json({ erro: 'Erro ao dar baixa.' });
+    } finally {
+        conn.release();
     }
 });
 
