@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
 const pool = require('./db'); // Agora chama o pool do MySQL
 require('dotenv').config();
 
@@ -232,10 +233,9 @@ app.post('/api/login', async (req, res) => {
     try {
         const { email, senha } = req.body;
 
-        // Adicionámos o ArmazemID aqui no SELECT
         const [utilizadores] = await pool.query(
-            'SELECT ID, Nome, Cargo, ArmazemID FROM Usuarios WHERE Email = ? AND Senha = ?', 
-            [email, senha]
+            'SELECT ID, Nome, Cargo, ArmazemID, Senha FROM Usuarios WHERE Email = ?',
+            [email]
         );
 
         if (utilizadores.length === 0) {
@@ -243,11 +243,16 @@ app.post('/api/login', async (req, res) => {
         }
 
         const utilizador = utilizadores[0];
+        const senhaCorreta = await bcrypt.compare(senha, utilizador.Senha);
 
-        res.status(200).json({ 
+        if (!senhaCorreta) {
+            return res.status(401).json({ erro: 'Email ou Senha incorretos!' });
+        }
+
+        res.status(200).json({
             mensagem: `Bem-vindo, ${utilizador.Nome}!`,
             cargo: utilizador.Cargo,
-            armazemId: utilizador.ArmazemID, // 🔑 Enviamos a chave para o frontend
+            armazemId: utilizador.ArmazemID,
             redirecionar: utilizador.Cargo === 'Gestor' ? '/index.html' : '/operador.html'
         });
     } catch (erro) {
@@ -266,10 +271,12 @@ app.post('/api/registo', async (req, res) => {
             return res.status(400).json({ erro: 'Este email já está em uso! Tenta fazer login.' });
         }
 
+        const senhaHash = await bcrypt.hash(senha, 12);
+
         // Força o cargo a "Cliente" por defeito no registo público
         await pool.query(
-            'INSERT INTO Usuarios (Nome, Email, Senha, Cargo) VALUES (?, ?, ?, "Cliente")', 
-            [nome, email, senha]
+            'INSERT INTO Usuarios (Nome, Email, Senha, Cargo) VALUES (?, ?, ?, "Cliente")',
+            [nome, email, senhaHash]
         );
 
         res.status(200).json({ mensagem: 'Conta criada com sucesso! Bem-vindo à WMS Store.' });
