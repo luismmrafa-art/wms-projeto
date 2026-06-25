@@ -10,12 +10,13 @@
         body { display: flex; flex-direction: column; align-items: center; padding: 24px; }
         .cabecalho {
             position: relative;
-            background: linear-gradient(135deg, var(--azul-escuro) 0%, #14233c 100%);
-            color: white; padding: 22px 24px; border-radius: var(--raio);
+            background: #f4f6fa;
+            color: var(--azul-escuro); padding: 22px 24px; border-radius: var(--raio);
             width: 100%; max-width: 1000px; text-align: center; margin-bottom: 22px;
-            box-shadow: var(--sombra-forte);
+            border: 1px solid var(--borda);
+            box-shadow: var(--sombra);
         }
-        .cabecalho h1 { color: white; margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 0.3px; }
+        .cabecalho h1 { color: var(--azul-escuro); margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 0.3px; }
         /* Layout em COLUNA: mapa em cima (largura toda) e ferramentas em baixo */
         .conteudo { display: flex; flex-direction: column; gap: 22px; width: 100%; max-width: 1000px; }
 
