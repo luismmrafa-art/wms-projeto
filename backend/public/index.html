@@ -458,18 +458,40 @@
         function adicionarAoCarrinho() {
             const nome = document.getElementById('simuProduto').value;
             const qtd = parseInt(document.getElementById('simuQtd').value);
-            
+
             if(!nome || qtd < 1) return;
 
-            // Guarda na memória
+            // Guarda na memória e redesenha a lista
             carrinhoDeCompras.push({ nome, qtd });
-            
-            // Desenha no ecrã para o Gestor ver
-            document.getElementById('listaCarrinho').innerHTML += `<li style="margin-bottom: 5px;">✔️ ${qtd}x ${nome}</li>`;
-            
+            desenharCarrinho();
+
             // Limpa a caixa de texto para o próximo produto
             document.getElementById('simuProduto').value = '';
             document.getElementById('simuQtd').value = '1';
+        }
+
+        // Remove um item do carrinho pela sua posição
+        function removerDoCarrinho(index) {
+            carrinhoDeCompras.splice(index, 1);
+            desenharCarrinho();
+        }
+
+        // Redesenha a lista do carrinho a partir da memória, com botão de remover em cada item
+        function desenharCarrinho() {
+            const lista = document.getElementById('listaCarrinho');
+            lista.innerHTML = '';
+            carrinhoDeCompras.forEach((item, i) => {
+                const li = document.createElement('li');
+                li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background:#f8f9fa; border:1px solid #e9ecef; border-radius:6px; padding:6px 10px; margin-bottom:5px;';
+                li.innerHTML = `<span>✔️ ${item.qtd}x ${item.nome}</span>`;
+                const btn = document.createElement('button');
+                btn.textContent = '✖';
+                btn.title = 'Remover';
+                btn.style.cssText = 'background:#e63946; color:white; border:none; border-radius:4px; cursor:pointer; width:26px; height:26px; padding:0; margin:0; font-size:12px;';
+                btn.onclick = () => removerDoCarrinho(i);
+                li.appendChild(btn);
+                lista.appendChild(li);
+            });
         }
 
         async function enviarOrdem() {
@@ -486,7 +508,7 @@
 
             if(res.ok) {
                 carrinhoDeCompras = []; // Esvazia o carrinho da memória
-                document.getElementById('listaCarrinho').innerHTML = ''; // Limpa o ecrã
+                desenharCarrinho(); // Limpa o ecrã
                 carregarVendas(); // Atualiza a tabela logo a seguir
                 alert("🎉 Encomenda Múltipla Enviada para o Armazém!");
             } else {
