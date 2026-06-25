@@ -7,6 +7,13 @@ import 'dart:convert';
 //                    telemóvel real    -> 'http://<IP-do-PC>:3000'
 const String baseUrl = 'http://localhost:3000';
 
+// 🎨 Paleta da marca (igual à da web para um visual consistente)
+const Color azulEscuro = Color(0xFF1D3557);
+const Color azul = Color(0xFF457B9D);
+const Color verde = Color(0xFF2A9D8F);
+const Color vermelho = Color(0xFFE63946);
+const Color fundo = Color(0xFFEEF1F6);
+
 void main() {
   runApp(const MinhaApp());
 }
@@ -20,11 +27,43 @@ class MinhaApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'WMS Operador',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
-        scaffoldBackgroundColor: Colors.grey[100],
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(seedColor: azulEscuro, primary: azulEscuro),
+        scaffoldBackgroundColor: fundo,
+        // Barra do topo uniforme
+        appBarTheme: const AppBarTheme(
+          backgroundColor: azulEscuro,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          centerTitle: false,
+        ),
+        // Campos de texto arredondados e com "anel" ao focar
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFD8DEE8))),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFD8DEE8))),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: azul, width: 2)),
+        ),
+        // Botões principais arredondados e consistentes
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: azulEscuro,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+        ),
+        cardTheme: CardThemeData(
+          elevation: 2,
+          shadowColor: Colors.black.withValues(alpha: 0.15),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
       ),
       // 🚀 A APP AGORA COMEÇA NO ECRÃ DE LOGIN!
-      home: const EcraLogin(), 
+      home: const EcraLogin(),
     );
   }
 }
@@ -91,48 +130,63 @@ class _EcraLoginState extends State<EcraLogin> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: Container(
-          width: 350,
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10)]),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.warehouse, size: 60, color: Colors.blue),
-              const SizedBox(height: 10),
-              const Text('WMS Operador', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 30),
-              TextField(
-                controller: _emailCtrl,
-                decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder(), prefixIcon: Icon(Icons.email)),
+      body: Container(
+        // Fundo com gradiente azul-escuro (igual à web)
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [azulEscuro, Color(0xFF14233C)],
+          ),
+        ),
+        child: Center(
+          child: SingleChildScrollView(
+            child: Container(
+              width: 350,
+              margin: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(28),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 24, offset: Offset(0, 8))]),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.warehouse, size: 60, color: azulEscuro),
+                  const SizedBox(height: 10),
+                  const Text('WMS Operador', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: azulEscuro)),
+                  const SizedBox(height: 4),
+                  const Text('Inicia sessão para continuar', style: TextStyle(fontSize: 13, color: Colors.black54)),
+                  const SizedBox(height: 28),
+                  TextField(
+                    controller: _emailCtrl,
+                    decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.email_outlined)),
+                  ),
+                  const SizedBox(height: 15),
+                  TextField(
+                    controller: _senhaCtrl,
+                    obscureText: true,
+                    decoration: const InputDecoration(labelText: 'Senha', prefixIcon: Icon(Icons.lock_outline)),
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: _aCarregar ? null : fazerLogin,
+                      child: _aCarregar
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('ENTRAR'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (context) => const EcraRegistoOperador()));
+                    },
+                    style: TextButton.styleFrom(foregroundColor: azul),
+                    child: const Text('Não tens conta? Cria uma aqui'),
+                  ),
+                ],
               ),
-              const SizedBox(height: 15),
-              TextField(
-                controller: _senhaCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'Senha', border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock)),
-              ),
-              const SizedBox(height: 25),
-              SizedBox(
-                width: double.infinity,
-                height: 45,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue[800], foregroundColor: Colors.white),
-                  onPressed: _aCarregar ? null : fazerLogin,
-                  child: _aCarregar
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : const Text('ENTRAR', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextButton(
-                onPressed: () {
-                  Navigator.push(context, MaterialPageRoute(builder: (context) => const EcraRegistoOperador()));
-                },
-                child: const Text('Não tens conta? Cria uma aqui'),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -229,8 +283,6 @@ class _EcraRegistoOperadorState extends State<EcraRegistoOperador> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Criar Conta de Operador'),
-        backgroundColor: Colors.blue[800],
-        foregroundColor: Colors.white,
       ),
       body: _aCarregar
           ? const Center(child: CircularProgressIndicator())
@@ -238,34 +290,34 @@ class _EcraRegistoOperadorState extends State<EcraRegistoOperador> {
               child: SingleChildScrollView(
                 child: Container(
                   width: 350,
-                  padding: const EdgeInsets.all(24),
+                  padding: const EdgeInsets.all(28),
                   margin: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10)]),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 16, offset: Offset(0, 6))]),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.person_add, size: 50, color: Colors.blue),
+                      const Icon(Icons.person_add_alt_1, size: 54, color: azulEscuro),
                       const SizedBox(height: 20),
                       TextField(
                         controller: _nomeCtrl,
-                        decoration: const InputDecoration(labelText: 'Nome', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person)),
+                        decoration: const InputDecoration(labelText: 'Nome', prefixIcon: Icon(Icons.person_outline)),
                       ),
                       const SizedBox(height: 15),
                       TextField(
                         controller: _emailCtrl,
-                        decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder(), prefixIcon: Icon(Icons.email)),
+                        decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.email_outlined)),
                       ),
                       const SizedBox(height: 15),
                       TextField(
                         controller: _senhaCtrl,
                         obscureText: true,
-                        decoration: const InputDecoration(labelText: 'Senha', border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock)),
+                        decoration: const InputDecoration(labelText: 'Senha', prefixIcon: Icon(Icons.lock_outline)),
                       ),
                       const SizedBox(height: 15),
                       DropdownButtonFormField<int>(
                         initialValue: _armazemSelecionado,
                         isExpanded: true,
-                        decoration: const InputDecoration(labelText: 'Armazém', border: OutlineInputBorder(), prefixIcon: Icon(Icons.warehouse)),
+                        decoration: const InputDecoration(labelText: 'Armazém', prefixIcon: Icon(Icons.warehouse)),
                         hint: const Text('Escolhe o armazém'),
                         items: _armazens.map<DropdownMenuItem<int>>((a) {
                           final cidade = (a['Cidade'] != null && a['Cidade'].toString().isNotEmpty) ? ' (${a['Cidade']})' : '';
@@ -279,13 +331,12 @@ class _EcraRegistoOperadorState extends State<EcraRegistoOperador> {
                       const SizedBox(height: 25),
                       SizedBox(
                         width: double.infinity,
-                        height: 45,
+                        height: 48,
                         child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.blue[800], foregroundColor: Colors.white),
                           onPressed: _aRegistar ? null : fazerRegisto,
                           child: _aRegistar
                               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                              : const Text('CRIAR CONTA', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                              : const Text('CRIAR CONTA'),
                         ),
                       ),
                     ],
@@ -337,7 +388,7 @@ class _EcraTarefasState extends State<EcraTarefas> {
         });
       }
     } catch (e) {
-      print('Erro de ligação: $e');
+      debugPrint('Erro de ligação: $e');
       setState(() => aCarregar = false);
     }
   }
@@ -361,7 +412,7 @@ class _EcraTarefasState extends State<EcraTarefas> {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ ${erro['erro']}'), backgroundColor: Colors.red));
       }
     } catch (e) {
-      print('Erro ao confirmar: $e');
+      debugPrint('Erro ao confirmar: $e');
     }
   }
 
@@ -369,11 +420,10 @@ class _EcraTarefasState extends State<EcraTarefas> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Tarefas - ${widget.nomeOperador}'), // Mostra o nome do Operador
-        backgroundColor: Colors.blue[800],
-        foregroundColor: Colors.white,
+        title: Text('Tarefas · ${widget.nomeOperador}'), // Mostra o nome do Operador
         actions: [
           IconButton(
+            tooltip: 'Atualizar',
             icon: const Icon(Icons.refresh),
             onPressed: () {
               setState(() => aCarregar = true);
@@ -381,6 +431,7 @@ class _EcraTarefasState extends State<EcraTarefas> {
             },
           ),
           IconButton(
+            tooltip: 'Sair',
             icon: const Icon(Icons.exit_to_app),
             onPressed: () {
               // Faz Logout e volta ao ecrã inicial
@@ -389,39 +440,74 @@ class _EcraTarefasState extends State<EcraTarefas> {
           )
         ],
       ),
-      body: aCarregar 
+      body: aCarregar
           ? const Center(child: CircularProgressIndicator())
-          : tarefas.isEmpty 
-              ? const Center(child: Text('Não há tarefas! Bom trabalho 🎉', style: TextStyle(fontSize: 20)))
+          : tarefas.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check_circle_outline, size: 72, color: verde),
+                      const SizedBox(height: 12),
+                      const Text('Não há tarefas!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: azulEscuro)),
+                      const SizedBox(height: 4),
+                      const Text('Bom trabalho 🎉', style: TextStyle(fontSize: 15, color: Colors.black54)),
+                    ],
+                  ),
+                )
               : ListView.builder(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: tarefas.length,
                   itemBuilder: (context, index) {
                     final t = tarefas[index];
                     return Card(
-                      margin: const EdgeInsets.all(12),
-                      elevation: 4,
+                      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                       child: Padding(
                         padding: const EdgeInsets.all(16.0),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              'Apanhar: ${t['Quantidade']}x ${t['Produto']}',
-                              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(color: azul.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
+                                  child: const Icon(Icons.inventory_2_outlined, color: azul),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    '${t['Quantidade']}x ${t['Produto']}',
+                                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: azulEscuro),
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 10),
-                            Text(
-                              '📍 Prateleira X:${t['PosX']} | Y:${t['PosY']} | Nível: ${t['Nivel']}',
-                              style: const TextStyle(fontSize: 16, color: Colors.black87),
+                            const SizedBox(height: 14),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              decoration: BoxDecoration(color: fundo, borderRadius: BorderRadius.circular(10)),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.place_outlined, size: 18, color: Colors.black54),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'X: ${t['PosX']}   ·   Y: ${t['PosY']}   ·   Nível: ${t['Nivel']}',
+                                    style: const TextStyle(fontSize: 15, color: Colors.black87, fontWeight: FontWeight.w500),
+                                  ),
+                                ],
+                              ),
                             ),
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 16),
                             SizedBox(
                               width: double.infinity,
                               height: 50,
-                              child: ElevatedButton(
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(backgroundColor: verde),
                                 onPressed: () => confirmarTarefa(t['TarefaID']),
-                                child: const Text('CONFIRMAR RECOLHA', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                                icon: const Icon(Icons.check, color: Colors.white),
+                                label: const Text('CONFIRMAR RECOLHA', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                               ),
                             )
                           ],
