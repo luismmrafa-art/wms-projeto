@@ -60,8 +60,8 @@ app.get('/api/tarefas/pendentes', verificarToken, async (req, res) => {
                 p.PosY, 
                 pr.Nivel
             FROM Encomendas e
-            JOIN Produtos pr ON e.ProdutoNome = pr.Nome AND e.ArmazemID = pr.ArmazemID
-            JOIN Prateleiras p ON pr.PrateleiraID = p.ID
+            LEFT JOIN Produtos pr ON e.ProdutoNome = pr.Nome AND e.ArmazemID = pr.ArmazemID
+            LEFT JOIN Prateleiras p ON pr.PrateleiraID = p.ID
             WHERE e.Estado = 'Pendente' AND e.ArmazemID = ?
             GROUP BY e.ID
         `;
@@ -415,17 +415,31 @@ app.post('/api/encomendas/carrinho', verificarToken, async (req, res) => {
 
         await conn.beginTransaction();
 
+        // Guarda o que já foi reservado dentro deste próprio carrinho (caso o mesmo produto apareça 2x)
+        const reservadoNesteCarrinho = {};
+
         for (let item of carrinho) {
+            // Stock físico no armazém
             const [stock] = await conn.query(
                 'SELECT COUNT(*) as total FROM Produtos WHERE Nome = ? AND ArmazemID = ? FOR UPDATE',
                 [item.nome, armazemID]
             );
-            if (stock[0].total < item.qtd) {
+            // Quantidade já comprometida em encomendas ainda Pendentes (reservada, mas não recolhida)
+            const [reservado] = await conn.query(
+                "SELECT COALESCE(SUM(Quantidade), 0) as total FROM Encomendas WHERE ProdutoNome = ? AND ArmazemID = ? AND Estado = 'Pendente'",
+                [item.nome, armazemID]
+            );
+
+            const disponivel = stock[0].total - reservado[0].total - (reservadoNesteCarrinho[item.nome] || 0);
+
+            if (disponivel < item.qtd) {
                 await conn.rollback();
                 return res.status(400).json({
-                    erro: `Operação Bloqueada! Tentaste encomendar ${item.qtd}x "${item.nome}", mas só tens ${stock[0].total} em stock físico no armazém.`
+                    erro: `Operação Bloqueada! Tentaste encomendar ${item.qtd}x "${item.nome}", mas só tens ${disponivel} disponível (stock físico menos encomendas pendentes).`
                 });
             }
+
+            reservadoNesteCarrinho[item.nome] = (reservadoNesteCarrinho[item.nome] || 0) + item.qtd;
         }
 
         const [usuarios] = await conn.query("SELECT ID FROM Usuarios WHERE ArmazemID = ? LIMIT 1", [armazemID]);
