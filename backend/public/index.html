@@ -249,7 +249,23 @@
                     divMapa.appendChild(celula);
                 }
             }
-            desenharRobo(); 
+
+            // 🚦 Evita que o robô fique "preso": se estiver numa prateleira ou
+            // fora dos limites do mapa, salta para a primeira célula livre.
+            const ocupadas = new Set(prateleiras.map(p => `${p.PosX},${p.PosY}`));
+            const foraDoMapa = roboX < 1 || roboX > maxX || roboY < 1 || roboY > maxY;
+            if (foraDoMapa || ocupadas.has(`${roboX},${roboY}`)) {
+                let encontrou = false;
+                for (let y = 1; y <= maxY && !encontrou; y++) {
+                    for (let x = 1; x <= maxX && !encontrou; x++) {
+                        if (!ocupadas.has(`${x},${y}`)) { roboX = x; roboY = y; encontrou = true; }
+                    }
+                }
+                sessionStorage.setItem('roboX', roboX);
+                sessionStorage.setItem('roboY', roboY);
+            }
+
+            desenharRobo();
         }
 
         // --- 2. O CÉREBRO DE NAVEGAÇÃO DO ROBÔ ---
