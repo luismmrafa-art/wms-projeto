@@ -18,3 +18,6 @@ app_operador/*.iml
 .DS_Store
 Thumbs.db
 *.log
+
+# ===== Ferramentas =====
+.claude/
