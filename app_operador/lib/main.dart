@@ -2,6 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
+// 🌐 Endereço base do servidor. Muda AQUI (num só sítio) quando testares
+// noutro sítio. Ex.: emulador Android -> 'http://10.0.2.2:3000'
+//                    telemóvel real    -> 'http://<IP-do-PC>:3000'
+const String baseUrl = 'http://localhost:3000';
+
 void main() {
   runApp(const MinhaApp());
 }
@@ -47,7 +52,7 @@ class _EcraLoginState extends State<EcraLogin> {
     try {
       // 1. Pede ao servidor para validar o utilizador
       final res = await http.post(
-        Uri.parse('http://localhost:3000/api/login'),
+        Uri.parse('$baseUrl/api/login'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'email': _emailCtrl.text, 'senha': _senhaCtrl.text}),
       );
@@ -162,7 +167,7 @@ class _EcraRegistoOperadorState extends State<EcraRegistoOperador> {
 
   Future<void> buscarArmazens() async {
     try {
-      final res = await http.get(Uri.parse('http://localhost:3000/api/armazens'));
+      final res = await http.get(Uri.parse('$baseUrl/api/armazens'));
       if (res.statusCode == 200) {
         setState(() {
           _armazens = jsonDecode(res.body);
@@ -189,7 +194,7 @@ class _EcraRegistoOperadorState extends State<EcraRegistoOperador> {
 
     try {
       final res = await http.post(
-        Uri.parse('http://localhost:3000/api/operador/registo'),
+        Uri.parse('$baseUrl/api/operador/registo'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'nome': _nomeCtrl.text,
@@ -317,7 +322,7 @@ class _EcraTarefasState extends State<EcraTarefas> {
   Future<void> buscarTarefas() async {
     try {
       // 🔑 Usa a chave específica deste operador no URL
-      final resposta = await http.get(Uri.parse('http://localhost:3000/api/tarefas/pendentes?armazemID=${widget.armazemID}'));
+      final resposta = await http.get(Uri.parse('$baseUrl/api/tarefas/pendentes?armazemID=${widget.armazemID}'));
       
       if (resposta.statusCode == 200) {
         final dados = json.decode(resposta.body);
@@ -335,7 +340,7 @@ class _EcraTarefasState extends State<EcraTarefas> {
   Future<void> confirmarTarefa(int idTarefa) async {
     try {
       final resposta = await http.post(
-        Uri.parse('http://localhost:3000/api/operador/concluir'),
+        Uri.parse('$baseUrl/api/operador/concluir'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'encomendaId': idTarefa}),
       );
