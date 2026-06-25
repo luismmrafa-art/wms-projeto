@@ -157,14 +157,21 @@ app.post('/api/prateleiras/nova', verificarToken, async (req, res) => {
 });
 
 
-// Rota para Apagar um Produto
+// Rota para Apagar um Produto (só do próprio armazém)
 app.delete('/api/produtos/:id', verificarToken, async (req, res) => {
     try {
         const { id } = req.params;
-        console.log("Tentando apagar o produto com ID:", id); // Isto ajuda a ver no terminal
-        
-        await pool.query('DELETE FROM Produtos WHERE ID = ?', [id]);
-        
+
+        // 🔒 Só apaga se o produto for do armazém deste utilizador (vem do token)
+        const [resultado] = await pool.query(
+            'DELETE FROM Produtos WHERE ID = ? AND ArmazemID = ?',
+            [id, req.utilizador.armazemID]
+        );
+
+        if (resultado.affectedRows === 0) {
+            return res.status(404).json({ erro: 'Produto não encontrado neste armazém.' });
+        }
+
         res.status(200).json({ mensagem: 'Produto removido com sucesso!' });
     } catch (erro) {
         console.error("Erro no MySQL:", erro);
@@ -172,19 +179,25 @@ app.delete('/api/produtos/:id', verificarToken, async (req, res) => {
     }
 });
 
-// Rota para Apagar uma Prateleira (SÓ SE ESTIVER VAZIA)
+// Rota para Apagar uma Prateleira (só do próprio armazém E só se estiver vazia)
 app.delete('/api/prateleiras/:id', verificarToken, async (req, res) => {
     try {
         const { id } = req.params;
-        
+        const armazemID = req.utilizador.armazemID;
+
+        // 🔒 Confirma que a prateleira é deste armazém (vem do token)
+        const [prateleira] = await pool.query('SELECT ID FROM Prateleiras WHERE ID = ? AND ArmazemID = ?', [id, armazemID]);
+        if (prateleira.length === 0) {
+            return res.status(404).json({ erro: 'Prateleira não encontrada neste armazém.' });
+        }
+
         // Verifica se existem produtos associados a esta prateleira antes de permitir apagar
         const [produtos] = await pool.query('SELECT ID FROM Produtos WHERE PrateleiraID = ?', [id]);
-        
         if (produtos.length > 0) {
             return res.status(400).json({ erro: 'Não podes apagar uma prateleira que ainda tem produtos lá dentro!' });
         }
 
-        await pool.query('DELETE FROM Prateleiras WHERE ID = ?', [id]);
+        await pool.query('DELETE FROM Prateleiras WHERE ID = ? AND ArmazemID = ?', [id, armazemID]);
         res.status(200).json({ mensagem: 'Prateleira removida!' });
     } catch (erro) {
         res.status(500).json({ erro: 'Erro ao apagar prateleira' });
