@@ -49,7 +49,7 @@ function gerarToken(utilizador) {
 // 📱 APP DO OPERADOR: Buscar lista de tarefas
 app.get('/api/tarefas/pendentes', verificarToken, async (req, res) => {
     try {
-        const armazemID = req.query.armazemID;
+        const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
 
         const sql = `
             SELECT 
@@ -83,7 +83,7 @@ app.get('/api/tarefas/pendentes', verificarToken, async (req, res) => {
 // 📦 INVENTÁRIO: O Filtro Mágico (Só envia as prateleiras do armazém certo)
 app.get('/api/inventario', verificarToken, async (req, res) => {
     try {
-        const armazemId = req.query.armazemID; // Lê a chave que vem do URL
+        const armazemId = req.utilizador.armazemID; // 🔒 do token, não do cliente
         
         if (!armazemId) {
             return res.status(400).json({ erro: 'Falta o ID do armazém.' });
@@ -103,7 +103,8 @@ app.get('/api/inventario', verificarToken, async (req, res) => {
 // Rota para o Dashboard: Dar entrada de um Produto Novo
 app.post('/api/produtos/novo', verificarToken, async (req, res) => {
     try {
-        const { nome, posX, posY, nivel, armazemID } = req.body;
+        const { nome, posX, posY, nivel } = req.body;
+        const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
 
         console.log(`📦 Tentar arrumar: [${nome}] no X:${posX}, Y:${posY}, Nível:${nivel} do Armazém:${armazemID}`);
 
@@ -142,7 +143,8 @@ app.post('/api/produtos/novo', verificarToken, async (req, res) => {
 app.post('/api/prateleiras/nova', verificarToken, async (req, res) => {
     try {
         // Agora recebe também o armazemID
-        const { posX, posY, niveis, armazemID } = req.body; 
+        const { posX, posY, niveis } = req.body;
+        const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
         
         await pool.query(
             'INSERT INTO Prateleiras (PosX, PosY, Niveis, ArmazemID) VALUES (?, ?, ?, ?)', 
@@ -368,7 +370,7 @@ app.post('/api/loja/comprar', async (req, res) => {
 // 📊 TABELA DO GESTOR (Versão Final e Estável)
 app.get('/api/gestor/encomendas', verificarToken, async (req, res) => {
     try {
-        const armazemId = req.query.armazemID;
+        const armazemId = req.utilizador.armazemID; // 🔒 do token, não do cliente
 
         // Fazemos um JOIN para ir buscar o Nome do utilizador que corresponde ao ClienteID
         const sql = `
@@ -395,7 +397,8 @@ app.get('/api/gestor/encomendas', verificarToken, async (req, res) => {
 app.post('/api/encomendas/carrinho', verificarToken, async (req, res) => {
     const conn = await pool.getConnection();
     try {
-        const { carrinho, armazemID } = req.body;
+        const { carrinho } = req.body;
+        const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
 
         await conn.beginTransaction();
 
@@ -449,6 +452,12 @@ app.post('/api/operador/concluir', verificarToken, async (req, res) => {
 
         const { ProdutoNome, Quantidade, ArmazemID } = enc[0];
 
+        // 🔒 Garante que a encomenda pertence ao armazém deste operador (vem do token)
+        if (ArmazemID !== req.utilizador.armazemID) {
+            await conn.rollback();
+            return res.status(403).json({ erro: 'Esta encomenda não pertence ao teu armazém.' });
+        }
+
         const [posicao] = await conn.query(`
             SELECT p.PosX, p.PosY
             FROM Produtos prod
@@ -492,7 +501,7 @@ app.post('/api/operador/concluir', verificarToken, async (req, res) => {
 
 // 📡 ROTA DO RADAR: O site vai chamar isto de 2 em 2 segundos
 app.get('/api/robo/radar', verificarToken, (req, res) => {
-    const armazemID = req.query.armazemID;
+    const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
     const dados = radarRobo[armazemID] || null;
     res.json(dados);
 });
@@ -501,7 +510,8 @@ app.get('/api/robo/radar', verificarToken, (req, res) => {
 // 📂 IMPORTAR MAPA: Receber array JSON e criar estrutura
 app.post('/api/armazem/importar', verificarToken, async (req, res) => {
     try {
-        const { prateleiras, armazemID } = req.body;
+        const { prateleiras } = req.body;
+        const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
 
         // Verifica se o que foi enviado é mesmo uma lista
         if (!Array.isArray(prateleiras)) {
