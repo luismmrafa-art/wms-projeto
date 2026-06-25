@@ -1,8 +1,11 @@
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken'); // Para criar/verificar os tokens de login
 const pool = require('./db'); // Agora chama o pool do MySQL
 require('dotenv').config();
+
+const JWT_SECRET = process.env.JWT_SECRET; // Segredo que assina os tokens (vem do .env)
 
 // 🤖 Memória Global do Radar (Guarda a última posição do robô para cada Armazém)
 let radarRobo = {};
@@ -14,9 +17,37 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
+// 🛡️ GUARDA: middleware que exige um token válido para aceder à rota.
+// Lê o cabeçalho "Authorization: Bearer <token>", confirma a assinatura e
+// guarda os dados do utilizador em req.utilizador para as rotas usarem.
+function verificarToken(req, res, next) {
+    const cabecalho = req.headers['authorization'];
+    const token = cabecalho && cabecalho.startsWith('Bearer ') ? cabecalho.slice(7) : null;
+
+    if (!token) {
+        return res.status(401).json({ erro: 'Sem autorização. Faz login primeiro.' });
+    }
+
+    try {
+        req.utilizador = jwt.verify(token, JWT_SECRET);
+        next();
+    } catch (erro) {
+        return res.status(401).json({ erro: 'Sessão inválida ou expirada. Faz login de novo.' });
+    }
+}
+
+// Cria um token assinado com os dados essenciais do utilizador (válido 8 horas)
+function gerarToken(utilizador) {
+    return jwt.sign(
+        { id: utilizador.id, cargo: utilizador.cargo, armazemID: utilizador.armazemID },
+        JWT_SECRET,
+        { expiresIn: '8h' }
+    );
+}
+
 
 // 📱 APP DO OPERADOR: Buscar lista de tarefas
-app.get('/api/tarefas/pendentes', async (req, res) => {
+app.get('/api/tarefas/pendentes', verificarToken, async (req, res) => {
     try {
         const armazemID = req.query.armazemID;
 
@@ -50,7 +81,7 @@ app.get('/api/tarefas/pendentes', async (req, res) => {
 
 
 // 📦 INVENTÁRIO: O Filtro Mágico (Só envia as prateleiras do armazém certo)
-app.get('/api/inventario', async (req, res) => {
+app.get('/api/inventario', verificarToken, async (req, res) => {
     try {
         const armazemId = req.query.armazemID; // Lê a chave que vem do URL
         
@@ -70,7 +101,7 @@ app.get('/api/inventario', async (req, res) => {
 
 
 // Rota para o Dashboard: Dar entrada de um Produto Novo
-app.post('/api/produtos/novo', async (req, res) => {
+app.post('/api/produtos/novo', verificarToken, async (req, res) => {
     try {
         const { nome, posX, posY, nivel, armazemID } = req.body;
 
@@ -108,7 +139,7 @@ app.post('/api/produtos/novo', async (req, res) => {
 });
 
 // 🔨 CRIAR PRATELEIRA
-app.post('/api/prateleiras/nova', async (req, res) => {
+app.post('/api/prateleiras/nova', verificarToken, async (req, res) => {
     try {
         // Agora recebe também o armazemID
         const { posX, posY, niveis, armazemID } = req.body; 
@@ -125,7 +156,7 @@ app.post('/api/prateleiras/nova', async (req, res) => {
 
 
 // Rota para Apagar um Produto
-app.delete('/api/produtos/:id', async (req, res) => {
+app.delete('/api/produtos/:id', verificarToken, async (req, res) => {
     try {
         const { id } = req.params;
         console.log("Tentando apagar o produto com ID:", id); // Isto ajuda a ver no terminal
@@ -140,7 +171,7 @@ app.delete('/api/produtos/:id', async (req, res) => {
 });
 
 // Rota para Apagar uma Prateleira (SÓ SE ESTIVER VAZIA)
-app.delete('/api/prateleiras/:id', async (req, res) => {
+app.delete('/api/prateleiras/:id', verificarToken, async (req, res) => {
     try {
         const { id } = req.params;
         
@@ -159,7 +190,7 @@ app.delete('/api/prateleiras/:id', async (req, res) => {
 });
 
 // Buscar o tamanho guardado
-app.get('/api/config/tamanho', async (req, res) => {
+app.get('/api/config/tamanho', verificarToken, async (req, res) => {
     const [configs] = await pool.query('SELECT * FROM Configuracoes');
     const tamanho = {};
     configs.forEach(c => tamanho[c.Chave] = c.Valor);
@@ -167,7 +198,7 @@ app.get('/api/config/tamanho', async (req, res) => {
 });
 
 // Guardar novo tamanho
-app.post('/api/config/tamanho', async (req, res) => {
+app.post('/api/config/tamanho', verificarToken, async (req, res) => {
     const { largura, comprimento } = req.body;
     await pool.query('UPDATE Configuracoes SET Valor = ? WHERE Chave = "largura"', [largura]);
     await pool.query('UPDATE Configuracoes SET Valor = ? WHERE Chave = "comprimento"', [comprimento]);
@@ -196,8 +227,12 @@ app.post('/api/login', async (req, res) => {
             return res.status(401).json({ erro: 'Email ou Senha incorretos!' });
         }
 
+        // Gera o "bilhete" (token) que o frontend vai guardar e enviar nos próximos pedidos
+        const token = gerarToken({ id: utilizador.ID, cargo: utilizador.Cargo, armazemID: utilizador.ArmazemID });
+
         res.status(200).json({
             mensagem: `Bem-vindo, ${utilizador.Nome}!`,
+            token: token,
             cargo: utilizador.Cargo,
             armazemId: utilizador.ArmazemID,
             redirecionar: utilizador.Cargo === 'Gestor' ? '/index.html' : '/operador.html'
@@ -331,7 +366,7 @@ app.post('/api/loja/comprar', async (req, res) => {
 });
 
 // 📊 TABELA DO GESTOR (Versão Final e Estável)
-app.get('/api/gestor/encomendas', async (req, res) => {
+app.get('/api/gestor/encomendas', verificarToken, async (req, res) => {
     try {
         const armazemId = req.query.armazemID;
 
@@ -357,7 +392,7 @@ app.get('/api/gestor/encomendas', async (req, res) => {
 
 
 // 🛒 SIMULADOR: Receber um Carrinho de Compras (COM VALIDAÇÃO DE STOCK 🛡️)
-app.post('/api/encomendas/carrinho', async (req, res) => {
+app.post('/api/encomendas/carrinho', verificarToken, async (req, res) => {
     const conn = await pool.getConnection();
     try {
         const { carrinho, armazemID } = req.body;
@@ -399,7 +434,7 @@ app.post('/api/encomendas/carrinho', async (req, res) => {
 });
 
 // 👷 BAIXA DE STOCK (Agora controla o Robô!)
-app.post('/api/operador/concluir', async (req, res) => {
+app.post('/api/operador/concluir', verificarToken, async (req, res) => {
     const conn = await pool.getConnection();
     try {
         const { encomendaId } = req.body;
@@ -456,7 +491,7 @@ app.post('/api/operador/concluir', async (req, res) => {
 });
 
 // 📡 ROTA DO RADAR: O site vai chamar isto de 2 em 2 segundos
-app.get('/api/robo/radar', (req, res) => {
+app.get('/api/robo/radar', verificarToken, (req, res) => {
     const armazemID = req.query.armazemID;
     const dados = radarRobo[armazemID] || null;
     res.json(dados);
@@ -464,7 +499,7 @@ app.get('/api/robo/radar', (req, res) => {
 
 
 // 📂 IMPORTAR MAPA: Receber array JSON e criar estrutura
-app.post('/api/armazem/importar', async (req, res) => {
+app.post('/api/armazem/importar', verificarToken, async (req, res) => {
     try {
         const { prateleiras, armazemID } = req.body;
 

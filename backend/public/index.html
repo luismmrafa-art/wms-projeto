@@ -140,6 +140,24 @@
     </div>
 
     <script>
+        // --- TOKEN AUTOMÁTICO ---
+        // "Embrulha" o fetch para anexar o token de login a TODOS os pedidos /api/.
+        // Assim nenhuma chamada fica de fora e, se a sessão expirar (401), volta ao login.
+        const _fetchOriginal = window.fetch;
+        window.fetch = async function(url, options = {}) {
+            const token = sessionStorage.getItem('token');
+            if (token && typeof url === 'string' && url.includes('/api/')) {
+                options.headers = Object.assign({}, options.headers, { 'Authorization': 'Bearer ' + token });
+            }
+            const resposta = await _fetchOriginal(url, options);
+            if (resposta.status === 401) {
+                alert("⚠️ A tua sessão expirou. Faz login outra vez.");
+                sessionStorage.clear();
+                window.location.href = 'login.html';
+            }
+            return resposta;
+        };
+
         // --- SEGURANÇA E LOGIN ---
         // Impede que Operadores ou Clientes acedam ao painel do Gestor
         function verificarSeguranca() {

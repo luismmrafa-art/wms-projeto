@@ -64,13 +64,16 @@
                 const data = await res.json();
 
                 if (res.ok) {
+                    // Guarda o token (o "bilhete" de acesso) para enviar nos próximos pedidos
+                    sessionStorage.setItem('token', data.token);
+
                     // Guarda na memória temporária do browser (sessionStorage) as permissões da pessoa
                     // Isto serve para as outras páginas saberem quem está a navegar (ex: Gestor vs Cliente)
                     sessionStorage.setItem('cargoUtilizador', data.cargo);
-                    
+
                     // 👉 A NOVIDADE: Guarda a Chave do Armazém!
                     // Muito importante para sistemas Multi-Armazém (saber qual o mapa a carregar)
-                    sessionStorage.setItem('armazemID', data.armazemId); 
+                    sessionStorage.setItem('armazemID', data.armazemId);
 
                     // Atira a pessoa para a página certa baseada no cargo (ex: /index.html ou /loja.html)
                     window.location.href = data.redirecionar; 

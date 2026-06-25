@@ -66,7 +66,8 @@ class _EcraLoginState extends State<EcraLogin> {
             context,
             MaterialPageRoute(
               builder: (context) => EcraTarefas(
-                armazemID: dados['armazemId'].toString(), 
+                armazemID: dados['armazemId'].toString(),
+                token: dados['token'],
                 nomeOperador: dados['mensagem'].replaceAll('Bem-vindo, ', '').replaceAll('!', '')
               ),
             ),
@@ -301,9 +302,10 @@ class _EcraRegistoOperadorState extends State<EcraRegistoOperador> {
 // ==========================================
 class EcraTarefas extends StatefulWidget {
   final String armazemID; // 🔑 Recebe a chave do ecrã de Login!
+  final String token; // 🎫 Token de login para autorizar os pedidos
   final String nomeOperador;
 
-  const EcraTarefas({super.key, required this.armazemID, required this.nomeOperador});
+  const EcraTarefas({super.key, required this.armazemID, required this.token, required this.nomeOperador});
 
   @override
   State<EcraTarefas> createState() => _EcraTarefasState();
@@ -321,9 +323,12 @@ class _EcraTarefasState extends State<EcraTarefas> {
 
   Future<void> buscarTarefas() async {
     try {
-      // 🔑 Usa a chave específica deste operador no URL
-      final resposta = await http.get(Uri.parse('$baseUrl/api/tarefas/pendentes?armazemID=${widget.armazemID}'));
-      
+      // 🔑 Usa a chave específica deste operador no URL + envia o token de login
+      final resposta = await http.get(
+        Uri.parse('$baseUrl/api/tarefas/pendentes?armazemID=${widget.armazemID}'),
+        headers: {'Authorization': 'Bearer ${widget.token}'},
+      );
+
       if (resposta.statusCode == 200) {
         final dados = json.decode(resposta.body);
         setState(() {
@@ -341,7 +346,10 @@ class _EcraTarefasState extends State<EcraTarefas> {
     try {
       final resposta = await http.post(
         Uri.parse('$baseUrl/api/operador/concluir'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${widget.token}',
+        },
         body: json.encode({'encomendaId': idTarefa}),
       );
 
