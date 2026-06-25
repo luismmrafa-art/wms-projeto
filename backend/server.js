@@ -541,8 +541,9 @@ app.get('/api/robo/radar', verificarToken, (req, res) => {
 });
 
 
-// 📂 IMPORTAR MAPA: Receber array JSON e criar estrutura
+// 📂 IMPORTAR MAPA: Substitui TODA a planta do armazém (apaga a antiga primeiro)
 app.post('/api/armazem/importar', verificarToken, async (req, res) => {
+    const conn = await pool.getConnection();
     try {
         const { prateleiras } = req.body;
         const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
@@ -552,27 +553,37 @@ app.post('/api/armazem/importar', verificarToken, async (req, res) => {
             return res.status(400).json({ erro: 'Formato inválido. O ficheiro deve conter uma lista de prateleiras.' });
         }
 
-        // Loop: Constrói as prateleiras uma a uma
+        await conn.beginTransaction();
+
+        // 1. Reset: apaga produtos e prateleiras antigas deste armazém (evita sobreposição)
+        const [prodApagados] = await conn.query('DELETE FROM Produtos WHERE ArmazemID = ?', [armazemID]);
+        const [pratApagadas] = await conn.query('DELETE FROM Prateleiras WHERE ArmazemID = ?', [armazemID]);
+
+        // 2. Constrói as prateleiras novas (ignora duplicados dentro do próprio ficheiro)
+        const vistas = new Set();
+        let inseridas = 0;
         for (let plat of prateleiras) {
-            // Verifica se a posição já está ocupada naquele armazém
-            const [existe] = await pool.query(
-                'SELECT ID FROM Prateleiras WHERE PosX = ? AND PosY = ? AND ArmazemID = ?', 
-                [plat.posX, plat.posY, armazemID]
+            const chave = `${plat.posX},${plat.posY}`;
+            if (vistas.has(chave)) continue; // mesma posição repetida no ficheiro
+            vistas.add(chave);
+
+            await conn.query(
+                'INSERT INTO Prateleiras (PosX, PosY, Niveis, ArmazemID) VALUES (?, ?, ?, ?)',
+                [plat.posX, plat.posY, plat.niveis, armazemID]
             );
-            
-            // Se não existir nada lá, insere!
-            if (existe.length === 0) {
-                await pool.query(
-                    'INSERT INTO Prateleiras (PosX, PosY, Niveis, ArmazemID) VALUES (?, ?, ?, ?)', 
-                    [plat.posX, plat.posY, plat.niveis, armazemID]
-                );
-            }
+            inseridas++;
         }
 
-        res.status(201).json({ mensagem: 'Planta do armazém carregada!' });
+        await conn.commit();
+        res.status(201).json({
+            mensagem: `Planta carregada! ${inseridas} prateleiras criadas (removidas ${pratApagadas.affectedRows} antigas e ${prodApagados.affectedRows} produtos).`
+        });
     } catch (erro) {
+        await conn.rollback();
         console.error("Erro a importar JSON:", erro);
         res.status(500).json({ erro: 'Erro interno ao construir o armazém.' });
+    } finally {
+        conn.release();
     }
 });
 

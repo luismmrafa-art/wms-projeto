@@ -525,9 +525,12 @@
 
         async function importarMapa() {
             const input = document.getElementById('ficheiroJSON');
-            
+
             // 1. Verifica se a pessoa escolheu mesmo um ficheiro
             if (input.files.length === 0) return alert('⚠️ Primeiro tens de escolher um ficheiro .json!');
+
+            // Aviso: importar substitui o layout atual (apaga prateleiras e produtos deste armazém)
+            if (!confirm('⚠️ Importar vai APAGAR as prateleiras e produtos atuais deste armazém e construir o novo mapa.\n\nQueres continuar?')) return;
 
             const ficheiro = input.files[0];
             const reader = new FileReader();
