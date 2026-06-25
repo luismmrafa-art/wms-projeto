@@ -106,11 +106,17 @@ app.post('/api/produtos/novo', verificarToken, async (req, res) => {
         const { nome, posX, posY, nivel } = req.body;
         const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
 
-        console.log(`📦 Tentar arrumar: [${nome}] no X:${posX}, Y:${posY}, Nível:${nivel} do Armazém:${armazemID}`);
+        // Quantidade de unidades a arrumar (1 por defeito). Cada unidade é uma linha.
+        const quantidade = parseInt(req.body.quantidade) || 1;
+        if (quantidade < 1 || quantidade > 1000) {
+            return res.status(400).json({ erro: 'A quantidade tem de estar entre 1 e 1000.' });
+        }
+
+        console.log(`📦 Tentar arrumar: ${quantidade}x [${nome}] no X:${posX}, Y:${posY}, Nível:${nivel} do Armazém:${armazemID}`);
 
         // 1. Encontra a prateleira pelas coordenadas E pelo Armazém 🔐
         const [prateleiras] = await pool.query(
-            'SELECT ID, Niveis FROM Prateleiras WHERE PosX = ? AND PosY = ? AND ArmazemID = ?', 
+            'SELECT ID, Niveis FROM Prateleiras WHERE PosX = ? AND PosY = ? AND ArmazemID = ?',
             [posX, posY, armazemID]
         );
 
@@ -125,13 +131,14 @@ app.post('/api/produtos/novo', verificarToken, async (req, res) => {
             return res.status(400).json({ erro: `Essa prateleira só tem ${prateleira.Niveis} andares!` });
         }
 
-        // 3. Associa o produto à prateleira encontrada E ao Armazém 🔐
+        // 3. Insere uma linha por cada unidade (INSERT múltiplo)
+        const valores = Array.from({ length: quantidade }, () => [nome, prateleira.ID, nivel, armazemID]);
         await pool.query(
-            'INSERT INTO Produtos (Nome, PrateleiraID, Nivel, ArmazemID) VALUES (?, ?, ?, ?)', 
-            [nome, prateleira.ID, nivel, armazemID]
+            'INSERT INTO Produtos (Nome, PrateleiraID, Nivel, ArmazemID) VALUES ?',
+            [valores]
         );
 
-        res.status(200).json({ mensagem: 'Produto guardado com sucesso!' });
+        res.status(200).json({ mensagem: `${quantidade}x "${nome}" guardado(s) com sucesso!` });
 
     } catch (erro) {
         console.log('Erro ao guardar produto:', erro);

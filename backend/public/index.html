@@ -94,7 +94,10 @@
 
             <div class="card">
                 <h3>📥 Entrada de Produto</h3>
-                <div class="campo"><label>Nome / SKU:</label><input type="text" id="prodNome" placeholder="Ex: Motor V8"></div>
+                <div style="display:flex; gap:5px">
+                    <div class="campo" style="flex:2"><label>Nome / SKU:</label><input type="text" id="prodNome" placeholder="Ex: Motor V8"></div>
+                    <div class="campo" style="flex:1"><label>Qtd:</label><input type="number" id="prodQtd" value="1" min="1"></div>
+                </div>
                 <div style="display:flex; gap:5px">
                     <div class="campo"><label>Ir ao X:</label><input type="number" id="prodX" value="2" min="1"></div>
                     <div class="campo"><label>Ir ao Y:</label><input type="number" id="prodY" value="1" min="1"></div>
@@ -359,27 +362,30 @@
         }
 
         async function guardarProduto() {
-            const nome = document.getElementById('prodNome').value; 
-            const posX = parseInt(document.getElementById('prodX').value); 
-            const posY = parseInt(document.getElementById('prodY').value); 
+            const nome = document.getElementById('prodNome').value;
+            const posX = parseInt(document.getElementById('prodX').value);
+            const posY = parseInt(document.getElementById('prodY').value);
             const nivel = parseInt(document.getElementById('prodNivel').value);
-            
+            const quantidade = parseInt(document.getElementById('prodQtd').value) || 1;
+
             // 🔑 1. O código vai buscar a chave ao bolso do browser
             const armazemID = sessionStorage.getItem('armazemID');
 
             if (!nome) return alert("Escreve o nome do produto!");
-            
-            const res = await fetch('/api/produtos/novo', { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
+            if (quantidade < 1) return alert("A quantidade tem de ser pelo menos 1!");
+
+            const res = await fetch('/api/produtos/novo', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
                 // 🔑 2. A chave é enviada dentro deste pacote para o servidor!
-                body: JSON.stringify({ nome, posX, posY, nivel, armazemID }) 
+                body: JSON.stringify({ nome, posX, posY, nivel, quantidade, armazemID })
             });
-            
+
             if(res.ok) {
                 document.getElementById('prodNome').value = '';
+                document.getElementById('prodQtd').value = '1';
                 carregarMapa();
-                moverRobo(posX, posY); 
+                moverRobo(posX, posY);
             } else { 
                 const erro = await res.json();
                 alert("❌ Erro: " + (erro.erro || "Falha ao guardar.")); 
