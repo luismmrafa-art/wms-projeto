@@ -114,15 +114,179 @@ class _EcraLoginState extends State<EcraLogin> {
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.blue[800], foregroundColor: Colors.white),
                   onPressed: _aCarregar ? null : fazerLogin,
-                  child: _aCarregar 
+                  child: _aCarregar
                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                     : const Text('ENTRAR', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
-              )
+              ),
+              const SizedBox(height: 10),
+              TextButton(
+                onPressed: () {
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const EcraRegistoOperador()));
+                },
+                child: const Text('Não tens conta? Cria uma aqui'),
+              ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+// ==========================================
+// 📝 ECRÃ DE REGISTO DE OPERADOR
+// ==========================================
+class EcraRegistoOperador extends StatefulWidget {
+  const EcraRegistoOperador({super.key});
+
+  @override
+  State<EcraRegistoOperador> createState() => _EcraRegistoOperadorState();
+}
+
+class _EcraRegistoOperadorState extends State<EcraRegistoOperador> {
+  final _nomeCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _senhaCtrl = TextEditingController();
+
+  List _armazens = [];
+  int? _armazemSelecionado;
+  bool _aCarregar = true; // a carregar a lista de armazéns
+  bool _aRegistar = false;
+
+  @override
+  void initState() {
+    super.initState();
+    buscarArmazens();
+  }
+
+  Future<void> buscarArmazens() async {
+    try {
+      final res = await http.get(Uri.parse('http://localhost:3000/api/armazens'));
+      if (res.statusCode == 200) {
+        setState(() {
+          _armazens = jsonDecode(res.body);
+          _aCarregar = false;
+        });
+      } else {
+        setState(() => _aCarregar = false);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao carregar armazéns.'), backgroundColor: Colors.red));
+      }
+      setState(() => _aCarregar = false);
+    }
+  }
+
+  Future<void> fazerRegisto() async {
+    if (_nomeCtrl.text.isEmpty || _emailCtrl.text.isEmpty || _senhaCtrl.text.isEmpty || _armazemSelecionado == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preenche tudo e escolhe um armazém.'), backgroundColor: Colors.orange));
+      return;
+    }
+
+    setState(() => _aRegistar = true);
+
+    try {
+      final res = await http.post(
+        Uri.parse('http://localhost:3000/api/operador/registo'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'nome': _nomeCtrl.text,
+          'email': _emailCtrl.text,
+          'senha': _senhaCtrl.text,
+          'armazemID': _armazemSelecionado,
+        }),
+      );
+
+      final dados = jsonDecode(res.body);
+      if (res.statusCode == 201) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('✅ ${dados['mensagem']}'), backgroundColor: Colors.green));
+          Navigator.pop(context); // volta ao login
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ ${dados['erro']}'), backgroundColor: Colors.red));
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao contactar servidor.'), backgroundColor: Colors.red));
+      }
+    }
+    if (mounted) setState(() => _aRegistar = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Criar Conta de Operador'),
+        backgroundColor: Colors.blue[800],
+        foregroundColor: Colors.white,
+      ),
+      body: _aCarregar
+          ? const Center(child: CircularProgressIndicator())
+          : Center(
+              child: SingleChildScrollView(
+                child: Container(
+                  width: 350,
+                  padding: const EdgeInsets.all(24),
+                  margin: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10)]),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.person_add, size: 50, color: Colors.blue),
+                      const SizedBox(height: 20),
+                      TextField(
+                        controller: _nomeCtrl,
+                        decoration: const InputDecoration(labelText: 'Nome', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person)),
+                      ),
+                      const SizedBox(height: 15),
+                      TextField(
+                        controller: _emailCtrl,
+                        decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder(), prefixIcon: Icon(Icons.email)),
+                      ),
+                      const SizedBox(height: 15),
+                      TextField(
+                        controller: _senhaCtrl,
+                        obscureText: true,
+                        decoration: const InputDecoration(labelText: 'Senha', border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock)),
+                      ),
+                      const SizedBox(height: 15),
+                      DropdownButtonFormField<int>(
+                        initialValue: _armazemSelecionado,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'Armazém', border: OutlineInputBorder(), prefixIcon: Icon(Icons.warehouse)),
+                        hint: const Text('Escolhe o armazém'),
+                        items: _armazens.map<DropdownMenuItem<int>>((a) {
+                          final cidade = (a['Cidade'] != null && a['Cidade'].toString().isNotEmpty) ? ' (${a['Cidade']})' : '';
+                          return DropdownMenuItem<int>(
+                            value: a['ID'],
+                            child: Text('${a['Nome']}$cidade', overflow: TextOverflow.ellipsis),
+                          );
+                        }).toList(),
+                        onChanged: (v) => setState(() => _armazemSelecionado = v),
+                      ),
+                      const SizedBox(height: 25),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 45,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.blue[800], foregroundColor: Colors.white),
+                          onPressed: _aRegistar ? null : fazerRegisto,
+                          child: _aRegistar
+                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                              : const Text('CRIAR CONTA', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
     );
   }
 }

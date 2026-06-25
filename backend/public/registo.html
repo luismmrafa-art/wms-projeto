@@ -23,8 +23,8 @@
 
     <div class="caixa-login">
         <h1>📦 WMS Store</h1>
-        <p style="color:#666; margin-bottom: 30px; font-size: 14px;">Cria a tua conta de Cliente</p>
-        
+        <p style="color:#666; margin-bottom: 30px; font-size: 14px;">Cria o teu armazém e a tua conta de Gestor</p>
+
         <div class="campo">
             <label>O teu Nome:</label>
             <input type="text" id="inputNome" placeholder="Ex: João Silva">
@@ -34,10 +34,20 @@
             <label>Email:</label>
             <input type="email" id="inputEmail" placeholder="ex: joao@email.com">
         </div>
-        
+
         <div class="campo">
             <label>Password:</label>
             <input type="password" id="inputSenha" placeholder="Cria uma password forte">
+        </div>
+
+        <div class="campo">
+            <label>Nome do Armazém:</label>
+            <input type="text" id="inputArmazem" placeholder="Ex: Armazém Central">
+        </div>
+
+        <div class="campo">
+            <label>Cidade (opcional):</label>
+            <input type="text" id="inputCidade" placeholder="Ex: Porto">
         </div>
 
         <button class="btn-entrar" onclick="fazerRegisto()">CRIAR CONTA</button>
@@ -54,16 +64,18 @@
             const nome = document.getElementById('inputNome').value;
             const email = document.getElementById('inputEmail').value;
             const senha = document.getElementById('inputSenha').value;
+            const nomeArmazem = document.getElementById('inputArmazem').value;
+            const cidade = document.getElementById('inputCidade').value;
 
-            // Segurança básica: Impede o envio se faltar algum dado
-            if(!nome || !email || !senha) return alert("Preenche todos os campos!");
+            // Segurança básica: Impede o envio se faltar algum dado obrigatório
+            if(!nome || !email || !senha || !nomeArmazem) return alert("Preenche o nome, email, password e o nome do armazém!");
 
             try {
                 // Faz um pedido POST à API com os dados em formato JSON
                 const res = await fetch('/api/registo', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ nome, email, senha })
+                    body: JSON.stringify({ nome, email, senha, nomeArmazem, cidade })
                 });
 
                 // Converte a resposta do servidor para ler a mensagem ou o erro

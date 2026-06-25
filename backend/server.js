@@ -14,35 +14,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Rota para importar o Mapa (JSON)
-app.post('/api/mapa/importar', async (req, res) => {
-    try {
-        const layout = req.body; 
-
-        // Limpa a tabela antes de importar o novo mapa
-        await pool.query('DELETE FROM Prateleiras');
-
-        // Itera sobre o JSON e insere cada prateleira individualmente
-        for (let i = 0; i < layout.prateleiras.length; i++) {
-            const prat = layout.prateleiras[i];
-            
-            await pool.query(
-                'INSERT INTO Prateleiras (PosX, PosY, Niveis) VALUES (?, ?, ?)',
-                [prat.x, prat.y, prat.niveis]
-            );
-        }
-
-        res.status(200).json({ 
-            mensagem: 'Mapa importado com sucesso!',
-            totalPrateleiras: layout.prateleiras.length
-        });
-
-    } catch (erro) {
-        console.log('Erro ao importar mapa:', erro);
-        res.status(500).json({ erro: 'Erro interno no servidor' });
-    }
-});
-
 
 // 📱 APP DO OPERADOR: Buscar lista de tarefas
 app.get('/api/tarefas/pendentes', async (req, res) => {
@@ -75,30 +46,6 @@ app.get('/api/tarefas/pendentes', async (req, res) => {
     }
 });
 
-// Rota para a App Móvel: Confirmar que o produto foi apanhado
-app.post('/api/tarefas/confirmar', async (req, res) => {
-    try {
-        const idDaTarefa = req.body.tarefaID; 
-
-        // Altera o estado da linha da encomenda para "Recolhido"
-        const [resultado] = await pool.query(
-            'UPDATE EncomendaLinhas SET Recolhido = 1 WHERE ID = ?', 
-            [idDaTarefa]
-        );
-
-        if (resultado.affectedRows === 0) {
-            return res.status(404).json({ erro: 'Tarefa não encontrada.' });
-        }
-
-        res.status(200).json({ 
-            mensagem: `Boa! Produto da tarefa ${idDaTarefa} apanhado com sucesso.` 
-        });
-
-    } catch (erro) {
-        console.log('Erro ao confirmar tarefa:', erro);
-        res.status(500).json({ erro: 'Erro interno no servidor' });
-    }
-});
 
 
 
@@ -260,28 +207,92 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// 📝 ROTA DE REGISTO: Criar conta de Cliente
+// 📝 ROTA DE REGISTO (WEB): Cria um Armazém NOVO + a conta de Gestor desse armazém
 app.post('/api/registo', async (req, res) => {
+    const conn = await pool.getConnection();
     try {
-        const { nome, email, senha } = req.body;
+        const { nome, email, senha, nomeArmazem, cidade } = req.body;
+
+        // Validação dos campos obrigatórios
+        if (!nome || !email || !senha || !nomeArmazem) {
+            return res.status(400).json({ erro: 'Preenche o teu nome, email, password e o nome do armazém.' });
+        }
 
         // Validação para evitar emails duplicados
+        const [existe] = await conn.query('SELECT ID FROM Usuarios WHERE Email = ?', [email]);
+        if (existe.length > 0) {
+            return res.status(400).json({ erro: 'Este email já está em uso! Tenta fazer login.' });
+        }
+
+        await conn.beginTransaction();
+
+        // 1. Cria o armazém novo
+        const [resArmazem] = await conn.query(
+            'INSERT INTO Armazens (Nome, Cidade) VALUES (?, ?)',
+            [nomeArmazem, cidade || null]
+        );
+        const armazemID = resArmazem.insertId;
+
+        // 2. Cria a conta de Gestor ligada a esse armazém
+        const senhaHash = await bcrypt.hash(senha, 12);
+        await conn.query(
+            'INSERT INTO Usuarios (Nome, Email, Senha, Cargo, ArmazemID) VALUES (?, ?, ?, "Gestor", ?)',
+            [nome, email, senhaHash, armazemID]
+        );
+
+        await conn.commit();
+        res.status(201).json({ mensagem: `Armazém "${nomeArmazem}" criado! Já podes fazer login como Gestor.` });
+    } catch (erro) {
+        await conn.rollback();
+        console.error("Erro no registo:", erro);
+        res.status(500).json({ erro: 'Erro interno no servidor ao criar conta.' });
+    } finally {
+        conn.release();
+    }
+});
+
+// 🏬 LISTAR ARMAZÉNS: Usado pelo app Flutter para o operador escolher onde se liga
+app.get('/api/armazens', async (req, res) => {
+    try {
+        const [armazens] = await pool.query('SELECT ID, Nome, Cidade FROM Armazens ORDER BY Nome');
+        res.json(armazens);
+    } catch (erro) {
+        console.error("Erro ao listar armazéns:", erro);
+        res.status(500).json({ erro: 'Erro ao carregar armazéns.' });
+    }
+});
+
+// 👷 REGISTO DE OPERADOR (FLUTTER): Cria conta de Operador ligada a um armazém EXISTENTE
+// Vários operadores podem partilhar o mesmo ArmazemID.
+app.post('/api/operador/registo', async (req, res) => {
+    try {
+        const { nome, email, senha, armazemID } = req.body;
+
+        if (!nome || !email || !senha || !armazemID) {
+            return res.status(400).json({ erro: 'Preenche todos os campos e escolhe um armazém.' });
+        }
+
+        // O armazém escolhido tem de existir
+        const [armazem] = await pool.query('SELECT ID FROM Armazens WHERE ID = ?', [armazemID]);
+        if (armazem.length === 0) {
+            return res.status(404).json({ erro: 'Esse armazém não existe.' });
+        }
+
+        // Email único
         const [existe] = await pool.query('SELECT ID FROM Usuarios WHERE Email = ?', [email]);
         if (existe.length > 0) {
             return res.status(400).json({ erro: 'Este email já está em uso! Tenta fazer login.' });
         }
 
         const senhaHash = await bcrypt.hash(senha, 12);
-
-        // Força o cargo a "Cliente" por defeito no registo público
         await pool.query(
-            'INSERT INTO Usuarios (Nome, Email, Senha, Cargo) VALUES (?, ?, ?, "Cliente")',
-            [nome, email, senhaHash]
+            'INSERT INTO Usuarios (Nome, Email, Senha, Cargo, ArmazemID) VALUES (?, ?, ?, "Operador", ?)',
+            [nome, email, senhaHash, armazemID]
         );
 
-        res.status(200).json({ mensagem: 'Conta criada com sucesso! Bem-vindo à WMS Store.' });
+        res.status(201).json({ mensagem: 'Conta de operador criada! Já podes fazer login.' });
     } catch (erro) {
-        console.error("Erro no registo:", erro);
+        console.error("Erro no registo de operador:", erro);
         res.status(500).json({ erro: 'Erro interno no servidor ao criar conta.' });
     }
 });
@@ -342,28 +353,6 @@ app.get('/api/gestor/encomendas', async (req, res) => {
     }
 });
 
-
-// 🤖 SIMULADOR: Gerar ordem de picking (Como se viesse de um ERP como o SAP)
-app.post('/api/encomendas/simular', async (req, res) => {
-    try {
-        const { nome, armazemID } = req.body;
-
-        // Para não dar erro na Base de Dados, atribuímos a encomenda ao dono do armazém (o Gestor)
-        const [usuarios] = await pool.query("SELECT ID FROM Usuarios WHERE ArmazemID = ? LIMIT 1", [armazemID]);
-        const clienteDeTesteID = usuarios.length > 0 ? usuarios[0].ID : 1; 
-
-        // Cria a encomenda
-        await pool.query(
-            'INSERT INTO Encomendas (ClienteID, ProdutoNome, Estado, Data, ArmazemID) VALUES (?, ?, "Pendente", NOW(), ?)', 
-            [clienteDeTesteID, nome, armazemID]
-        );
-
-        res.status(201).json({ mensagem: 'Ordem gerada!' });
-    } catch (erro) {
-        console.error(erro);
-        res.status(500).json({ erro: 'Erro ao gerar encomenda.' });
-    }
-});
 
 
 
