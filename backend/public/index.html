@@ -27,7 +27,7 @@
         .prateleira { background: var(--azul); color: white; font-weight: 700; cursor: pointer; border: 2px solid var(--azul-escuro); box-shadow: 0 3px 8px rgba(29,53,87,0.25); }
         .prateleira:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(29,53,87,0.30); }
 
-        /* O NOSSO ROBÔ 🚜 - Elemento que flutua (absolute) por cima da grelha */
+        /* O NOSSO ROBÔ 🚚 - Elemento que flutua (absolute) por cima da grelha */
         .agv { position: absolute; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; font-size: 30px; transition: all 0.3s linear; z-index: 10; pointer-events: none; filter: drop-shadow(2px 3px 3px rgba(0,0,0,0.4)); }
 
         /* Ferramentas do Gestor - agora numa FILA horizontal por baixo do mapa */
@@ -69,7 +69,7 @@
     <div class="conteudo">
         <div class="mapa-container">
             <div id="mapa" class="mapa-armazem">
-                <div id="agv" class="agv">🚜</div>
+                <div id="agv" class="agv">🚚</div>
             </div>
         </div>
 
@@ -152,7 +152,7 @@
             <div id="modalConteudo" class="lista-produtos"></div>
             <button id="btnDestruir" class="btn-destruir" onclick="">💥 DESTRUIR ESTRUTURA</button>
             
-            <button id="btnChamarRobo" class="btn-robo" onclick="">🚜 CHAMAR AGV PARA AQUI</button>
+            <button id="btnChamarRobo" class="btn-robo" onclick="">🚚 CHAMAR AGV PARA AQUI</button>
         </div>
     </div>
 
@@ -271,7 +271,7 @@
         // --- 2. O CÉREBRO DE NAVEGAÇÃO DO ROBÔ ---
         // Algoritmo de "Pathfinding" (BFS) para descobrir o caminho mais curto desviando das prateleiras
         async function moverRobo(alvoX, alvoY) {
-            if (roboOcupado) return alert("🚜 O robô já está em movimento!");
+            if (roboOcupado) return alert("🚚 O robô já está em movimento!");
             roboOcupado = true;
 
             // Recolhe todas as posições bloqueadas (onde existem prateleiras)
@@ -329,7 +329,7 @@
                     desenharRobo();
                     await new Promise(r => setTimeout(r, 300)); // Aguarda 300ms entre cada salto
                 }
-                setTimeout(() => alert(`🚜 Operação Concluída na Posição X:${alvoX}, Y:${alvoY}!`), 100);
+                setTimeout(() => alert(`🚚 Operação Concluída na Posição X:${alvoX}, Y:${alvoY}!`), 100);
             } else {
                 alert("🚨 Bip Bop! Caminho bloqueado. Não consigo chegar a essa prateleira!");
             }
