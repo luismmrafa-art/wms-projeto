@@ -1,0 +1,175 @@
+/* =====================================================================
+   WMS — Folha de estilos PARTILHADA (login, registo e painel do gestor)
+   Centraliza cores, tipografia e componentes para um visual consistente.
+   ===================================================================== */
+
+/* Tipografia moderna (com fallback para o sistema caso não carregue) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+    /* Paleta da marca */
+    --azul-escuro: #1d3557;
+    --azul: #457b9d;
+    --verde: #2a9d8f;
+    --verde-escuro: #21867a;
+    --vermelho: #e63946;
+    --vermelho-escuro: #c1121f;
+    --dourado: #e9c46a;
+
+    /* Neutros / superfícies */
+    --fundo: #eef1f6;
+    --superficie: #ffffff;
+    --texto: #2b2d42;
+    --texto-suave: #6b7280;
+    --borda: #e2e8f0;
+
+    /* Forma e profundidade */
+    --raio: 12px;
+    --raio-sm: 8px;
+    --sombra: 0 4px 16px rgba(29, 53, 87, 0.08);
+    --sombra-forte: 0 12px 32px rgba(29, 53, 87, 0.18);
+    --transicao: 0.2s ease;
+
+    --fonte: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    font-family: var(--fonte);
+    color: var(--texto);
+    background: var(--fundo);
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- Tipografia ---------- */
+h1, h2, h3 { color: var(--azul-escuro); }
+
+/* ---------- Campos de formulário ---------- */
+.campo { margin-bottom: 16px; text-align: left; }
+
+label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--texto);
+}
+
+input, select {
+    width: 100%;
+    padding: 11px 12px;
+    font-size: 15px;
+    font-family: inherit;
+    color: var(--texto);
+    background: var(--superficie);
+    border: 1px solid var(--borda);
+    border-radius: var(--raio-sm);
+    transition: border-color var(--transicao), box-shadow var(--transicao);
+}
+
+input:focus, select:focus {
+    outline: none;
+    border-color: var(--azul);
+    box-shadow: 0 0 0 3px rgba(69, 123, 157, 0.18);
+}
+
+input::placeholder { color: #aab2c0; }
+
+/* ---------- Botões ---------- */
+button {
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 15px;
+    color: white;
+    background: var(--azul-escuro);
+    border: none;
+    border-radius: var(--raio-sm);
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: transform var(--transicao), box-shadow var(--transicao), background var(--transicao), opacity var(--transicao);
+}
+
+button:hover { transform: translateY(-1px); box-shadow: var(--sombra); }
+button:active { transform: translateY(0); }
+
+/* Variantes de cor reutilizáveis */
+.btn-verde { background: var(--verde); }
+.btn-verde:hover { background: var(--verde-escuro); }
+.btn-azul { background: var(--azul); }
+.btn-vermelho { background: var(--vermelho); }
+.btn-vermelho:hover { background: var(--vermelho-escuro); }
+
+/* ---------- Cartão genérico ---------- */
+.card {
+    background: var(--superficie);
+    padding: 22px;
+    border-radius: var(--raio);
+    border: 1px solid var(--borda);
+    box-shadow: var(--sombra);
+}
+
+/* =====================================================================
+   CAIXA DE AUTENTICAÇÃO (login.html e registo.html)
+   ===================================================================== */
+.tela-auth {
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+    background: linear-gradient(135deg, var(--azul-escuro) 0%, #14233c 100%);
+}
+
+.caixa-login {
+    background: var(--superficie);
+    padding: 40px;
+    border-radius: 16px;
+    box-shadow: var(--sombra-forte);
+    width: 100%;
+    max-width: 380px;
+    text-align: center;
+}
+
+.caixa-login h1 {
+    margin: 0 0 6px;
+    font-size: 26px;
+    font-weight: 800;
+}
+
+.caixa-login .subtitulo {
+    color: var(--texto-suave);
+    margin: 0 0 28px;
+    font-size: 14px;
+}
+
+/* Botão principal da caixa de login (ocupa toda a largura) */
+.btn-entrar {
+    width: 100%;
+    padding: 13px;
+    font-size: 16px;
+    margin-top: 8px;
+}
+
+.rodape {
+    margin-top: 22px;
+    font-size: 14px;
+    color: var(--texto-suave);
+}
+
+.rodape a {
+    color: var(--azul-escuro);
+    font-weight: 600;
+    text-decoration: none;
+}
+.rodape a:hover { text-decoration: underline; }
+
+.dica-login {
+    margin-top: 14px;
+    font-size: 12px;
+    color: var(--texto-suave);
+    background: var(--fundo);
+    border-radius: var(--raio-sm);
+    padding: 8px;
+}

@@ -4,26 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WMS - Criar Conta</title>
-    <style>
-        /* Estilos base para centrar a caixa no meio do ecrã e definir cores */
-        body { font-family: 'Segoe UI', sans-serif; background: #1d3557; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; color: #333;}
-        .caixa-login { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 100%; max-width: 350px; text-align: center; }
-        .caixa-login h1 { color: #1d3557; margin-top: 0; font-size: 24px;}
-        .campo { margin-bottom: 20px; text-align: left; }
-        .campo label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 14px;}
-        .campo input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; font-size: 16px;}
-        .btn-entrar { background: #2a9d8f; color: white; border: none; width: 100%; padding: 12px; font-size: 16px; font-weight: bold; border-radius: 5px; cursor: pointer; transition: 0.3s;}
-        .btn-entrar:hover { background: #21867a; }
-        .rodape { margin-top: 20px; font-size: 14px; color: #777;}
-        .rodape a { color: #1d3557; font-weight: bold; text-decoration: none; }
-        .rodape a:hover { text-decoration: underline; }
-    </style>
+    <link rel="stylesheet" href="estilo.css">
 </head>
-<body>
+<body class="tela-auth">
 
     <div class="caixa-login">
         <h1>📦 WMS Store</h1>
-        <p style="color:#666; margin-bottom: 30px; font-size: 14px;">Cria o teu armazém e a tua conta de Gestor</p>
+        <p class="subtitulo">Cria o teu armazém e a tua conta de Gestor</p>
 
         <div class="campo">
             <label>O teu Nome:</label>
@@ -50,7 +37,7 @@
             <input type="text" id="inputCidade" placeholder="Ex: Porto">
         </div>
 
-        <button class="btn-entrar" onclick="fazerRegisto()">CRIAR CONTA</button>
+        <button class="btn-entrar btn-verde" onclick="fazerRegisto()">CRIAR CONTA</button>
         
         <div class="rodape">
             Já tens conta? <a href="login.html">Faz Login aqui</a>
