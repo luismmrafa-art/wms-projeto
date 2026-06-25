@@ -10,13 +10,14 @@
         body { display: flex; flex-direction: column; align-items: center; padding: 24px; }
         .cabecalho {
             position: relative;
-            background: #f4f6fa;
-            color: var(--azul-escuro); padding: 22px 24px; border-radius: var(--raio);
+            background: linear-gradient(135deg, var(--azul-escuro) 0%, #14233c 100%);
+            color: white; padding: 22px 24px; border-radius: var(--raio);
             width: 100%; max-width: 1000px; text-align: center; margin-bottom: 22px;
-            border: 1px solid var(--borda);
-            box-shadow: var(--sombra);
+            box-shadow: var(--sombra-forte);
         }
-        .cabecalho h1 { color: var(--azul-escuro); margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 0.3px; }
+        .cabecalho h1 { color: white; margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 0.3px; display: inline-flex; align-items: center; gap: 12px; }
+        /* Selo branco para o logo se destacar no cabeçalho escuro */
+        .logo-badge { background: white; border-radius: 10px; padding: 6px; display: inline-flex; box-shadow: 0 2px 6px rgba(0,0,0,0.25); }
         /* Layout em COLUNA: mapa em cima (largura toda) e ferramentas em baixo */
         .conteudo { display: flex; flex-direction: column; gap: 22px; width: 100%; max-width: 1000px; }
 
@@ -62,7 +63,7 @@
 <body>
 
     <div class="cabecalho">
-        <h1><img src="logo.png" alt="Logo" class="logo-topo">WMS - Centro de Comando Lógico</h1>
+        <h1><span class="logo-badge"><img src="logo.png" alt="Logo" class="logo-topo"></span>WMS - Centro de Comando Lógico</h1>
         <button class="btn-sair-topo" onclick="sair()">Sair do Sistema</button>
     </div>
 
