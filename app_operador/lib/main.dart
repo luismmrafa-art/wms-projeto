@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
 // 🌐 Endereço base do servidor. Muda AQUI (num só sítio) quando testares
@@ -14,12 +15,25 @@ const Color verde = Color(0xFF2A9D8F);
 const Color vermelho = Color(0xFFE63946);
 const Color fundo = Color(0xFFEEF1F6);
 
-void main() {
-  runApp(const MinhaApp());
+void main() async {
+  // Necessário para ler o armazenamento antes de desenhar a app
+  WidgetsFlutterBinding.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
+  final token = prefs.getString('token');
+  final armazemID = prefs.getString('armazemID');
+  final nomeOperador = prefs.getString('nomeOperador');
+
+  // Se já houver uma sessão guardada, vai direto para as tarefas; senão, login
+  final Widget telaInicial = (token != null && armazemID != null)
+      ? EcraTarefas(armazemID: armazemID, token: token, nomeOperador: nomeOperador ?? 'Operador')
+      : const EcraLogin();
+
+  runApp(MinhaApp(telaInicial: telaInicial));
 }
 
 class MinhaApp extends StatelessWidget {
-  const MinhaApp({super.key});
+  final Widget telaInicial;
+  const MinhaApp({super.key, required this.telaInicial});
 
   @override
   Widget build(BuildContext context) {
@@ -62,8 +76,8 @@ class MinhaApp extends StatelessWidget {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
       ),
-      // 🚀 A APP AGORA COMEÇA NO ECRÃ DE LOGIN!
-      home: const EcraLogin(),
+      // 🚀 Começa no login OU direto nas tarefas, se já houver sessão guardada
+      home: telaInicial,
     );
   }
 }
@@ -98,16 +112,26 @@ class _EcraLoginState extends State<EcraLogin> {
 
       if (res.statusCode == 200) {
         final dados = jsonDecode(res.body);
-        
-        // 2. Login com Sucesso! Passamos o ArmazemID para o próximo ecrã
+
+        final armazemID = dados['armazemId'].toString();
+        final token = dados['token'] as String;
+        final nomeOperador = dados['mensagem'].replaceAll('Bem-vindo, ', '').replaceAll('!', '');
+
+        // 2. Login com Sucesso! Guarda a sessão para a app se manter "logada"
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('token', token);
+        await prefs.setString('armazemID', armazemID);
+        await prefs.setString('nomeOperador', nomeOperador);
+
+        // 3. Vai para o ecrã de tarefas
         if (mounted) {
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
               builder: (context) => EcraTarefas(
-                armazemID: dados['armazemId'].toString(),
-                token: dados['token'],
-                nomeOperador: dados['mensagem'].replaceAll('Bem-vindo, ', '').replaceAll('!', '')
+                armazemID: armazemID,
+                token: token,
+                nomeOperador: nomeOperador,
               ),
             ),
           );
@@ -386,11 +410,29 @@ class _EcraTarefasState extends State<EcraTarefas> {
           tarefas = (dados is List) ? dados : [];
           aCarregar = false;
         });
+      } else if (resposta.statusCode == 401) {
+        // Token inválido ou expirado -> termina a sessão
+        terminarSessao(expirada: true);
       }
     } catch (e) {
       debugPrint('Erro de ligação: $e');
       setState(() => aCarregar = false);
     }
+  }
+
+  // Limpa a sessão guardada e volta ao ecrã de login
+  Future<void> terminarSessao({bool expirada = false}) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('token');
+    await prefs.remove('armazemID');
+    await prefs.remove('nomeOperador');
+    if (!mounted) return;
+    if (expirada) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('A tua sessão expirou. Faz login outra vez.'), backgroundColor: Colors.orange),
+      );
+    }
+    Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const EcraLogin()));
   }
 
   Future<void> confirmarTarefa(int idTarefa) async {
@@ -407,6 +449,8 @@ class _EcraTarefasState extends State<EcraTarefas> {
       if (resposta.statusCode == 200) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Recolha confirmada!'), backgroundColor: Colors.green));
         buscarTarefas(); // Atualiza a lista
+      } else if (resposta.statusCode == 401) {
+        terminarSessao(expirada: true);
       } else {
         final erro = jsonDecode(resposta.body);
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ ${erro['erro']}'), backgroundColor: Colors.red));
@@ -433,10 +477,7 @@ class _EcraTarefasState extends State<EcraTarefas> {
           IconButton(
             tooltip: 'Sair',
             icon: const Icon(Icons.exit_to_app),
-            onPressed: () {
-              // Faz Logout e volta ao ecrã inicial
-              Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const EcraLogin()));
-            },
+            onPressed: () => terminarSessao(), // Limpa a sessão guardada e volta ao login
           )
         ],
       ),
