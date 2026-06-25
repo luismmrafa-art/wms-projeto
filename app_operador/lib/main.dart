@@ -149,7 +149,7 @@ class _EcraLoginState extends State<EcraLogin> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.warehouse, size: 60, color: azulEscuro),
+                  Image.asset('assets/logo.png', height: 80, errorBuilder: (c, e, s) => const Icon(Icons.warehouse, size: 60, color: azulEscuro)),
                   const SizedBox(height: 10),
                   const Text('WMS Operador', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: azulEscuro)),
                   const SizedBox(height: 4),

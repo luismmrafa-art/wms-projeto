@@ -132,10 +132,26 @@ button:active { transform: translateY(0); }
     text-align: center;
 }
 
+/* Logo no topo das caixas de login/registo */
+.logo-auth {
+    height: 72px;
+    width: auto;
+    margin-bottom: 14px;
+    object-fit: contain;
+}
+
 .caixa-login h1 {
     margin: 0 0 6px;
     font-size: 26px;
     font-weight: 800;
+}
+
+/* Logo pequeno no cabeçalho do painel do gestor */
+.logo-topo {
+    height: 38px;
+    width: auto;
+    vertical-align: middle;
+    margin-right: 10px;
 }
 
 .caixa-login .subtitulo {
