@@ -22,3 +22,7 @@ Thumbs.db
 
 # ===== Ferramentas =====
 .claude/
+
+# ===== Relatorio / artefactos (nao sao codigo) =====
+*.docx
+ispgaya.png
