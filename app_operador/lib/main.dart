@@ -39,7 +39,7 @@ class MinhaApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'WMS Operador',
+      title: 'BoxToCar Operador',
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: azulEscuro, primary: azulEscuro),
@@ -175,7 +175,7 @@ class _EcraLoginState extends State<EcraLogin> {
                 children: [
                   Image.asset('assets/logo.png', height: 80, errorBuilder: (c, e, s) => const Icon(Icons.warehouse, size: 60, color: azulEscuro)),
                   const SizedBox(height: 10),
-                  const Text('WMS Operador', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: azulEscuro)),
+                  const Text('BoxToCar Operador', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: azulEscuro)),
                   const SizedBox(height: 4),
                   const Text('Inicia sessão para continuar', style: TextStyle(fontSize: 13, color: Colors.black54)),
                   const SizedBox(height: 28),

@@ -1,4 +1,4 @@
-# WMS — Sistema de Gestão de Armazém (Picking)
+# BoxToCar — Sistema de Gestão de Armazém (Picking)
 
 Sistema de gestão de armazém (*Warehouse Management System*) com mapa interativo,
 controlo de stock e picking. Cada **Gestor** cria o seu armazém e os **Operadores**
