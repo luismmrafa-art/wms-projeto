@@ -372,14 +372,10 @@ app.get('/api/loja/produtos', async (req, res) => {
 // 🛍️ ROTA DA LOJA: O cliente clica em "Comprar"
 app.post('/api/loja/comprar', async (req, res) => {
     try {
-        const { clienteEmail, produtoNome } = req.body; 
+        const { produtoNome } = req.body;
 
-        const [clientes] = await pool.query('SELECT ID FROM Usuarios WHERE Email = ?', [clienteEmail]);
-        if (clientes.length === 0) return res.status(400).json({ erro: 'Cliente não encontrado' });
-        const clienteID = clientes[0].ID;
-
-        // Guarda a encomenda e O QUE o cliente comprou
-        await pool.query('INSERT INTO Encomendas (ClienteID, ProdutoNome, Estado) VALUES (?, ?, "Pendente")', [clienteID, produtoNome]);
+        // Guarda a encomenda (o que foi comprado)
+        await pool.query('INSERT INTO Encomendas (ProdutoNome, Estado) VALUES (?, "Pendente")', [produtoNome]);
         
         res.status(200).json({ mensagem: `Boa! Compraste um ${produtoNome}. O armazém já foi avisado!` });
     } catch (erro) {
@@ -393,13 +389,12 @@ app.get('/api/gestor/encomendas', verificarToken, async (req, res) => {
     try {
         const armazemId = req.utilizador.armazemID; // 🔒 do token, não do cliente
 
-        // Fazemos um JOIN para ir buscar o Nome do utilizador que corresponde ao ClienteID
+        // As encomendas vêm do simulador ERP (não há cliente individual associado).
         const sql = `
-            SELECT e.ID, u.Nome as Cliente, e.ProdutoNome, e.Estado, e.Data 
+            SELECT e.ID, 'Simulador ERP' AS Cliente, e.ProdutoNome, e.Estado, e.Data
             FROM Encomendas e
-            JOIN Usuarios u ON e.ClienteID = u.ID
-            WHERE e.ArmazemID = ? 
-            ORDER BY e.Data DESC 
+            WHERE e.ArmazemID = ?
+            ORDER BY e.Data DESC
             LIMIT 10
         `;
         const [encomendas] = await pool.query(sql, [armazemId]);
@@ -450,13 +445,10 @@ app.post('/api/encomendas/carrinho', verificarToken, async (req, res) => {
             reservadoNesteCarrinho[item.nome] = (reservadoNesteCarrinho[item.nome] || 0) + item.qtd;
         }
 
-        const [usuarios] = await conn.query("SELECT ID FROM Usuarios WHERE ArmazemID = ? LIMIT 1", [armazemID]);
-        const clienteID = usuarios.length > 0 ? usuarios[0].ID : 1;
-
         for (let item of carrinho) {
             await conn.query(
-                'INSERT INTO Encomendas (ClienteID, ProdutoNome, Quantidade, Estado, Data, ArmazemID) VALUES (?, ?, ?, "Pendente", NOW(), ?)',
-                [clienteID, item.nome, item.qtd, armazemID]
+                'INSERT INTO Encomendas (ProdutoNome, Quantidade, Estado, Data, ArmazemID) VALUES (?, ?, "Pendente", NOW(), ?)',
+                [item.nome, item.qtd, armazemID]
             );
         }
 
