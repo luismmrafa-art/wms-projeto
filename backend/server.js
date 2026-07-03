@@ -3,6 +3,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken'); // Para criar/verificar os tokens de login
 const pool = require('./db'); // Agora chama o pool do MySQL
+const { planearRecolha } = require('./coordenacao'); // Cérebro da coordenação humano-máquina
 require('dotenv').config();
 
 const JWT_SECRET = process.env.JWT_SECRET; // Segredo que assina os tokens (vem do .env)
@@ -538,6 +539,46 @@ app.get('/api/robo/radar', verificarToken, (req, res) => {
     const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
     const dados = radarRobo[armazemID] || null;
     res.json(dados);
+});
+
+// 🤝 COORDENAÇÃO HUMANO-MÁQUINA (Indústria 5.0)
+// Dado um produto, calcula o ponto de encontro entre o operador e o robô virtual
+// e as rotas de ambos (algoritmo exato BFS), com métricas de eficiência.
+app.get('/api/coordenacao/plano', verificarToken, async (req, res) => {
+    try {
+        const armazemID = req.utilizador.armazemID; // 🔒 do token
+        const produtoNome = req.query.produto;
+
+        // 1. Descobre a prateleira onde o produto está guardado
+        const [pos] = await pool.query(`
+            SELECT p.PosX, p.PosY
+            FROM Produtos prod
+            JOIN Prateleiras p ON prod.PrateleiraID = p.ID
+            WHERE prod.Nome = ? AND prod.ArmazemID = ? LIMIT 1
+        `, [produtoNome, armazemID]);
+        if (pos.length === 0) {
+            return res.status(404).json({ erro: 'Produto não encontrado em nenhuma prateleira deste armazém.' });
+        }
+
+        // 2. Carrega a planta do armazém (prateleiras) e as dimensões da grelha
+        const [prateleiras] = await pool.query('SELECT PosX, PosY FROM Prateleiras WHERE ArmazemID = ?', [armazemID]);
+        const [configs] = await pool.query('SELECT * FROM Configuracoes');
+        let maxX = prateleiras.reduce((m, p) => Math.max(m, p.PosX), 1);
+        let maxY = prateleiras.reduce((m, p) => Math.max(m, p.PosY), 1);
+        configs.forEach(c => {
+            if (c.Chave === 'largura') maxX = Math.max(maxX, c.Valor);
+            if (c.Chave === 'comprimento') maxY = Math.max(maxY, c.Valor);
+        });
+
+        // 3. Calcula o plano de coordenação (ponto de encontro + rotas + métricas)
+        const plano = planearRecolha({ prateleiras, maxX, maxY, alvoX: pos[0].PosX, alvoY: pos[0].PosY });
+        if (plano.erro) return res.status(400).json({ erro: plano.erro });
+
+        res.json({ produto: produtoNome, ...plano });
+    } catch (erro) {
+        console.error('Erro na coordenação:', erro);
+        res.status(500).json({ erro: 'Erro ao calcular a coordenação.' });
+    }
 });
 
 
