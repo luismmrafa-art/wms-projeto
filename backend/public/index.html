@@ -28,6 +28,12 @@
         .prateleira { background: var(--azul); color: white; font-weight: 700; cursor: pointer; border: 2px solid var(--azul-escuro); box-shadow: 0 3px 8px rgba(29,53,87,0.25); }
         .prateleira:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(29,53,87,0.30); }
 
+        /* Destaque das rotas de coordenacao (sobre as celulas) */
+        .cel-rota-robo { box-shadow: inset 0 0 0 4px #e63946; }
+        .cel-rota-operador { box-shadow: inset 0 0 0 4px #2a9d8f; }
+        .cel-encontro { background: #e9c46a !important; color: #1d3557 !important; font-weight: 800 !important; box-shadow: 0 0 0 3px #1d3557; }
+        .cel-deposito { background: #1d3557 !important; color: white !important; font-weight: 800 !important; }
+
         /* O NOSSO ROBÔ 🚚 - Elemento que flutua (absolute) por cima da grelha */
         .agv { position: absolute; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; font-size: 30px; transition: all 0.3s linear; z-index: 10; pointer-events: none; filter: drop-shadow(2px 3px 3px rgba(0,0,0,0.4)); }
 
@@ -152,8 +158,22 @@
             </div>
             <div id="modalConteudo" class="lista-produtos"></div>
             <button id="btnDestruir" class="btn-destruir" onclick="">💥 DESTRUIR ESTRUTURA</button>
-            
+
             <button id="btnChamarRobo" class="btn-robo" onclick="">🚚 CHAMAR AGV PARA AQUI</button>
+
+            <button id="btnCoordenar" style="background:#2a9d8f; margin-top:10px;" onclick="">🤝 PLANEAR COORDENAÇÃO (Humano-Máquina)</button>
+        </div>
+    </div>
+
+    <!-- Painel de métricas da coordenação -->
+    <div id="painelCoord" style="display:none; position:fixed; bottom:20px; left:20px; z-index:900; background:white; border:1px solid var(--borda); border-radius:12px; box-shadow:var(--sombra-forte); padding:16px 18px; max-width:320px; font-size:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <b style="color:var(--azul-escuro);">🤝 Coordenação Humano-Máquina</b>
+            <button onclick="limparCoordenacao()" style="background:none; border:none; color:var(--vermelho); cursor:pointer; font-size:16px; width:auto; padding:0; margin:0;">✖</button>
+        </div>
+        <div id="coordConteudo"></div>
+        <div style="margin-top:10px; font-size:12px; color:var(--texto-suave);">
+            <span style="color:#e63946;">▬</span> rota do robô &nbsp; <span style="color:#2a9d8f;">▬</span> rota do operador (com carga) &nbsp; <b>M</b> ponto de encontro
         </div>
     </div>
 
@@ -417,12 +437,54 @@
             
             document.getElementById('btnDestruir').onclick = () => apagarPrateleira(plat.ID);
             document.getElementById('btnChamarRobo').onclick = () => moverRobo(plat.PosX, plat.PosY);
-            
+            document.getElementById('btnCoordenar').onclick = () => planearCoordenacao(plat.PosX, plat.PosY);
+
             document.getElementById('modalDetalhes').style.display = 'flex';
         }
 
         // Oculta a janela flutuante
         function fecharModal() { document.getElementById('modalDetalhes').style.display = 'none'; }
+
+        // --- 🤝 COORDENAÇÃO HUMANO-MÁQUINA (Indústria 5.0) ---
+        // Pede ao backend o plano (ponto de encontro + rotas) e desenha-o no mapa.
+        function limparCoordenacao() {
+            document.querySelectorAll('.cel-rota-robo,.cel-rota-operador,.cel-encontro,.cel-deposito')
+                .forEach(c => c.classList.remove('cel-rota-robo','cel-rota-operador','cel-encontro','cel-deposito'));
+            document.getElementById('painelCoord').style.display = 'none';
+        }
+        function celula(x, y) { return document.querySelector(`.celula[data-x="${x}"][data-y="${y}"]`); }
+
+        async function planearCoordenacao(posX, posY) {
+            fecharModal();
+            limparCoordenacao();
+            try {
+                const res = await fetch(`/api/coordenacao/plano?posX=${posX}&posY=${posY}`);
+                if (!res.ok) { const e = await res.json(); return alert('❌ ' + e.erro); }
+                const p = await res.json();
+
+                // Desenha a rota do robô (depósito -> encontro)
+                p.rotaRobo.forEach(c => { const el = celula(c.x, c.y); if (el) el.classList.add('cel-rota-robo'); });
+                // Desenha a rota do operador (recolha -> encontro)
+                p.rotaOperador.forEach(c => { const el = celula(c.x, c.y); if (el) el.classList.add('cel-rota-operador'); });
+                // Marca depósito e ponto de encontro
+                const dep = celula(p.deposito.x, p.deposito.y); if (dep) { dep.classList.add('cel-deposito'); dep.textContent = 'D'; }
+                const enc = celula(p.pontoEncontro.x, p.pontoEncontro.y); if (enc) { enc.classList.add('cel-encontro'); enc.textContent = 'M'; }
+
+                // Mostra as métricas
+                const m = p.metricas;
+                document.getElementById('coordConteudo').innerHTML = `
+                    <div>📦 Prateleira: <b>X${p.prateleira.x} Y${p.prateleira.y}</b></div>
+                    <div>🤝 Ponto de encontro: <b>X${p.pontoEncontro.x} Y${p.pontoEncontro.y}</b></div>
+                    <hr style="border:none;border-top:1px solid #eee;margin:8px 0;">
+                    <div>🚶 Operador com carga: <b>${m.operadorComCarga}</b> passos</div>
+                    <div>🚚 Robô até ao encontro: <b>${m.roboAteEncontro}</b> passos</div>
+                    <div>📉 Sem robô (até à expedição): <b>${m.operadorSemRobo}</b> passos</div>
+                    <div style="margin-top:6px;color:#2a9d8f;font-weight:700;">✅ Poupança ao operador: ${m.poupancaOperador} passos (${m.poupancaPercent}%)</div>`;
+                document.getElementById('painelCoord').style.display = 'block';
+            } catch (e) {
+                alert('Erro ao calcular a coordenação.');
+            }
+        }
         
         // Chamadas destrutivas à API (Apagar produto e prateleira com verificação)
         async function apagarProduto(id) { if(confirm("Remover?")) { await fetch(`/api/produtos/${id}`, { method: 'DELETE' }); fecharModal(); carregarMapa(); } }

@@ -460,6 +460,54 @@ class _EcraTarefasState extends State<EcraTarefas> {
     }
   }
 
+  // 🤝 Coordenação humano-máquina: mostra o ponto de encontro com o robô e a poupança
+  Future<void> verPontoEncontro(String produto) async {
+    try {
+      final resposta = await http.get(
+        Uri.parse('$baseUrl/api/coordenacao/plano?produto=${Uri.encodeComponent(produto)}'),
+        headers: {'Authorization': 'Bearer ${widget.token}'},
+      );
+      if (resposta.statusCode != 200) {
+        final erro = jsonDecode(resposta.body);
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ ${erro['erro']}'), backgroundColor: Colors.red));
+        return;
+      }
+      final p = jsonDecode(resposta.body);
+      final enc = p['pontoEncontro'];
+      final m = p['metricas'];
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('🤝 Coordenação com o robô'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Recolhe o "$produto" na prateleira e leva-o ao ponto de encontro:', style: const TextStyle(fontSize: 15)),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: const Color(0xFFE9C46A).withValues(alpha: 0.25), borderRadius: BorderRadius.circular(10)),
+                child: Text('📍 Ponto de encontro:  X ${enc['x']}   ·   Y ${enc['y']}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: azulEscuro)),
+              ),
+              const SizedBox(height: 12),
+              Text('🚶 Transportas a carga apenas ${m['operadorComCarga']} passos.', style: const TextStyle(fontSize: 14)),
+              Text('🚚 O robô percorre ${m['roboAteEncontro']} passos até ti.', style: const TextStyle(fontSize: 14)),
+              const SizedBox(height: 6),
+              Text('✅ Poupas ${m['poupancaOperador']} passos (${m['poupancaPercent']}%) de esforço com carga.',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: verde)),
+            ],
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+        ),
+      );
+    } catch (e) {
+      debugPrint('Erro na coordenação: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -540,7 +588,18 @@ class _EcraTarefasState extends State<EcraTarefas> {
                                 ],
                               ),
                             ),
-                            const SizedBox(height: 16),
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 44,
+                              child: OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(foregroundColor: azulEscuro, side: const BorderSide(color: azul)),
+                                onPressed: () => verPontoEncontro(t['Produto'].toString()),
+                                icon: const Icon(Icons.handshake_outlined),
+                                label: const Text('PONTO DE ENCONTRO (ROBÔ)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
                             SizedBox(
                               width: double.infinity,
                               height: 50,

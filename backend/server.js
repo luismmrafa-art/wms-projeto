@@ -549,15 +549,20 @@ app.get('/api/coordenacao/plano', verificarToken, async (req, res) => {
         const armazemID = req.utilizador.armazemID; // 🔒 do token
         const produtoNome = req.query.produto;
 
-        // 1. Descobre a prateleira onde o produto está guardado
-        const [pos] = await pool.query(`
-            SELECT p.PosX, p.PosY
-            FROM Produtos prod
-            JOIN Prateleiras p ON prod.PrateleiraID = p.ID
-            WHERE prod.Nome = ? AND prod.ArmazemID = ? LIMIT 1
-        `, [produtoNome, armazemID]);
-        if (pos.length === 0) {
-            return res.status(404).json({ erro: 'Produto não encontrado em nenhuma prateleira deste armazém.' });
+        // 1. Determina a prateleira-alvo: pela posição (clique no mapa) ou pelo produto
+        let alvoX = parseInt(req.query.posX);
+        let alvoY = parseInt(req.query.posY);
+        if (!Number.isInteger(alvoX) || !Number.isInteger(alvoY)) {
+            const [pos] = await pool.query(`
+                SELECT p.PosX, p.PosY
+                FROM Produtos prod
+                JOIN Prateleiras p ON prod.PrateleiraID = p.ID
+                WHERE prod.Nome = ? AND prod.ArmazemID = ? LIMIT 1
+            `, [produtoNome, armazemID]);
+            if (pos.length === 0) {
+                return res.status(404).json({ erro: 'Produto não encontrado em nenhuma prateleira deste armazém.' });
+            }
+            alvoX = pos[0].PosX; alvoY = pos[0].PosY;
         }
 
         // 2. Carrega a planta do armazém (prateleiras) e as dimensões da grelha
@@ -571,10 +576,10 @@ app.get('/api/coordenacao/plano', verificarToken, async (req, res) => {
         });
 
         // 3. Calcula o plano de coordenação (ponto de encontro + rotas + métricas)
-        const plano = planearRecolha({ prateleiras, maxX, maxY, alvoX: pos[0].PosX, alvoY: pos[0].PosY });
+        const plano = planearRecolha({ prateleiras, maxX, maxY, alvoX, alvoY });
         if (plano.erro) return res.status(400).json({ erro: plano.erro });
 
-        res.json({ produto: produtoNome, ...plano });
+        res.json({ produto: produtoNome || null, ...plano });
     } catch (erro) {
         console.error('Erro na coordenação:', erro);
         res.status(500).json({ erro: 'Erro ao calcular a coordenação.' });
