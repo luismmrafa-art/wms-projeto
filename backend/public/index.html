@@ -31,8 +31,11 @@
         /* Destaque das rotas de coordenacao (sobre as celulas) */
         .cel-rota-robo { box-shadow: inset 0 0 0 4px #e63946; }
         .cel-rota-operador { box-shadow: inset 0 0 0 4px #2a9d8f; }
-        .cel-encontro { background: #e9c46a !important; color: #1d3557 !important; font-weight: 800 !important; box-shadow: 0 0 0 3px #1d3557; }
-        .cel-deposito { background: #1d3557 !important; color: white !important; font-weight: 800 !important; }
+        .cel-encontro { position: relative; background: #e9c46a !important; color: #1d3557 !important; font-weight: 800 !important; box-shadow: 0 0 0 3px #1d3557; }
+        .cel-deposito { position: relative; background: #1d3557 !important; color: white !important; font-weight: 800 !important; }
+        /* Etiqueta M/D no canto, sem apagar a coordenada da célula */
+        .cel-encontro::after { content: "M"; position: absolute; top: 2px; right: 4px; font-size: 14px; font-weight: 800; color: #1d3557; }
+        .cel-deposito::after { content: "D"; position: absolute; top: 2px; right: 4px; font-size: 14px; font-weight: 800; color: #fff; }
 
         /* O NOSSO ROBÔ 🚚 - Elemento que flutua (absolute) por cima da grelha */
         .agv { position: absolute; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; font-size: 30px; transition: all 0.3s linear; z-index: 10; pointer-events: none; filter: drop-shadow(2px 3px 3px rgba(0,0,0,0.4)); }
@@ -377,8 +380,9 @@
         }
 
         async function criarPrateleira() {
-            const posX = parseInt(document.getElementById('platX').value); 
-            const posY = parseInt(document.getElementById('platY').value); 
+            limparCoordenacao();
+            const posX = parseInt(document.getElementById('platX').value);
+            const posY = parseInt(document.getElementById('platY').value);
             const niveis = parseInt(document.getElementById('platNivel').value);
             
             // 🔑 Vai buscar a chave do armazém
@@ -400,6 +404,7 @@
         }
 
         async function guardarProduto() {
+            limparCoordenacao();
             const nome = document.getElementById('prodNome').value;
             const posX = parseInt(document.getElementById('prodX').value);
             const posY = parseInt(document.getElementById('prodY').value);
@@ -464,8 +469,8 @@
             if (!p) return;
             p.rotaRobo.forEach(c => { const el = celula(c.x, c.y); if (el) el.classList.add('cel-rota-robo'); });
             p.rotaOperador.forEach(c => { const el = celula(c.x, c.y); if (el) el.classList.add('cel-rota-operador'); });
-            const dep = celula(p.deposito.x, p.deposito.y); if (dep) { dep.classList.add('cel-deposito'); dep.textContent = 'D'; }
-            const enc = celula(p.pontoEncontro.x, p.pontoEncontro.y); if (enc) { enc.classList.add('cel-encontro'); enc.textContent = 'M'; }
+            const dep = celula(p.deposito.x, p.deposito.y); if (dep) dep.classList.add('cel-deposito');
+            const enc = celula(p.pontoEncontro.x, p.pontoEncontro.y); if (enc) enc.classList.add('cel-encontro');
         }
 
         async function planearCoordenacao(posX, posY) {
@@ -590,7 +595,8 @@
 
         async function enviarOrdem() {
             if(carrinhoDeCompras.length === 0) return alert("O carrinho está vazio!");
-            
+            limparCoordenacao(); // limpa o overlay de coordenação antes de gerar a ordem
+
             const armazemID = sessionStorage.getItem('armazemID');
 
             const res = await fetch('/api/encomendas/carrinho', {
@@ -612,6 +618,7 @@
         }
 
         async function importarMapa() {
+            limparCoordenacao();
             const input = document.getElementById('ficheiroJSON');
 
             // 1. Verifica se a pessoa escolheu mesmo um ficheiro
