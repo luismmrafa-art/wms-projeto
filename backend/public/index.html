@@ -287,6 +287,7 @@
             }
 
             desenharRobo();
+            desenharCoordenacao(); // 🤝 mantém as rotas da coordenação visíveis após redesenhar o mapa
         }
 
         // --- 2. O CÉREBRO DE NAVEGAÇÃO DO ROBÔ ---
@@ -446,13 +447,26 @@
         function fecharModal() { document.getElementById('modalDetalhes').style.display = 'none'; }
 
         // --- 🤝 COORDENAÇÃO HUMANO-MÁQUINA (Indústria 5.0) ---
-        // Pede ao backend o plano (ponto de encontro + rotas) e desenha-o no mapa.
+        // Guarda o último plano para o REDESENHAR sempre que o mapa é reconstruído.
+        let planoCoordAtivo = null;
+        function celula(x, y) { return document.querySelector(`.celula[data-x="${x}"][data-y="${y}"]`); }
+
         function limparCoordenacao() {
+            planoCoordAtivo = null;
             document.querySelectorAll('.cel-rota-robo,.cel-rota-operador,.cel-encontro,.cel-deposito')
                 .forEach(c => c.classList.remove('cel-rota-robo','cel-rota-operador','cel-encontro','cel-deposito'));
             document.getElementById('painelCoord').style.display = 'none';
         }
-        function celula(x, y) { return document.querySelector(`.celula[data-x="${x}"][data-y="${y}"]`); }
+
+        // Desenha (ou volta a desenhar) o plano guardado sobre as células do mapa.
+        function desenharCoordenacao() {
+            const p = planoCoordAtivo;
+            if (!p) return;
+            p.rotaRobo.forEach(c => { const el = celula(c.x, c.y); if (el) el.classList.add('cel-rota-robo'); });
+            p.rotaOperador.forEach(c => { const el = celula(c.x, c.y); if (el) el.classList.add('cel-rota-operador'); });
+            const dep = celula(p.deposito.x, p.deposito.y); if (dep) { dep.classList.add('cel-deposito'); dep.textContent = 'D'; }
+            const enc = celula(p.pontoEncontro.x, p.pontoEncontro.y); if (enc) { enc.classList.add('cel-encontro'); enc.textContent = 'M'; }
+        }
 
         async function planearCoordenacao(posX, posY) {
             fecharModal();
@@ -462,13 +476,8 @@
                 if (!res.ok) { const e = await res.json(); return alert('❌ ' + e.erro); }
                 const p = await res.json();
 
-                // Desenha a rota do robô (depósito -> encontro)
-                p.rotaRobo.forEach(c => { const el = celula(c.x, c.y); if (el) el.classList.add('cel-rota-robo'); });
-                // Desenha a rota do operador (recolha -> encontro)
-                p.rotaOperador.forEach(c => { const el = celula(c.x, c.y); if (el) el.classList.add('cel-rota-operador'); });
-                // Marca depósito e ponto de encontro
-                const dep = celula(p.deposito.x, p.deposito.y); if (dep) { dep.classList.add('cel-deposito'); dep.textContent = 'D'; }
-                const enc = celula(p.pontoEncontro.x, p.pontoEncontro.y); if (enc) { enc.classList.add('cel-encontro'); enc.textContent = 'M'; }
+                planoCoordAtivo = p;      // guarda para persistir entre redesenhos
+                desenharCoordenacao();    // desenha as rotas e o ponto de encontro
 
                 // Mostra as métricas
                 const m = p.metricas;
