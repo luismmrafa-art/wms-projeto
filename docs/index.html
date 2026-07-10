@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BoxToCar — Sistema de Gestão de Armazém com Picking Assistido</title>
+<meta name="description" content="Projeto final de licenciatura em Engenharia Informática. Sistema de gestão de armazém com picking colaborativo entre operador humano e robô virtual.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#101A2E;
+    --slate:#46536B;
+    --line:#D8DCE3;
+    --paper:#F5F6F8;
+    --white:#FFFFFF;
+    --shelf:#2F5DA8;
+    --robot:#D33F49;
+    --operator:#1E8E5A;
+    --sans:"DM Sans",system-ui,sans-serif;
+    --mono:"DM Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--paper);color:var(--ink);
+    font-family:var(--sans);font-size:17px;line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+  .eyebrow{
+    font-family:var(--mono);font-size:12px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--slate);margin:0 0 14px
+  }
+
+  /* ---------- Hero ---------- */
+  .hero{background:var(--ink);color:#fff;padding:72px 0 64px}
+  .hero .eyebrow{color:#8FA0BE}
+  .hero-grid{display:grid;grid-template-columns:1fr 340px;gap:56px;align-items:center}
+  .hero h1{
+    font-size:clamp(34px,4.6vw,56px);line-height:1.04;letter-spacing:-.028em;
+    font-weight:700;margin:0 0 20px
+  }
+  .hero h1 em{font-style:normal;color:#8FA0BE;display:block;font-size:.52em;font-weight:500;letter-spacing:-.01em;margin-top:14px;line-height:1.35}
+  .lede{font-size:18px;color:#C3CBDA;margin:0 0 30px;max-width:44ch}
+  .meta{font-family:var(--mono);font-size:13px;color:#8FA0BE;line-height:1.9}
+  .meta b{color:#fff;font-weight:500}
+
+  /* ---------- Signature: warehouse grid ---------- */
+  .figure{background:#fff;border-radius:6px;padding:20px 20px 14px}
+  .figure svg{width:100%;height:auto;display:block}
+  .legend{
+    display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;
+    text-transform:uppercase;color:var(--slate)
+  }
+  .legend span{display:flex;align-items:center;gap:6px}
+  .swatch{width:14px;height:3px;border-radius:2px;display:inline-block}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+
+  .route{fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+  .route-robot{stroke:var(--robot)}
+  .route-op{stroke:var(--operator)}
+  @media (prefers-reduced-motion:no-preference){
+    .route{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);animation:draw .9s ease forwards}
+    .route-robot{animation-delay:.35s}
+    .route-op{animation-delay:1.1s}
+    .meet{opacity:0;animation:pop .5s ease 1.9s forwards}
+  }
+  @keyframes draw{to{stroke-dashoffset:0}}
+  @keyframes pop{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:scale(1)}}
+  .meet{transform-origin:154px 110px}
+
+  /* ---------- Metrics ---------- */
+  .metrics{background:var(--white);border-bottom:1px solid var(--line)}
+  .metrics-row{display:grid;grid-template-columns:repeat(3,1fr);gap:0}
+  .metric{padding:34px 0;border-right:1px solid var(--line)}
+  .metric:last-child{border-right:0}
+  .metric .n{font-family:var(--mono);font-size:38px;font-weight:500;letter-spacing:-.03em;line-height:1}
+  .metric .k{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--slate);margin-top:10px}
+
+  /* ---------- Sections ---------- */
+  section{padding:64px 0}
+  section + section{border-top:1px solid var(--line)}
+  h2{font-size:26px;letter-spacing:-.02em;margin:0 0 20px;font-weight:700}
+  h3{font-size:16px;margin:0 0 6px;font-weight:700}
+  p{margin:0 0 16px;max-width:70ch}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:40px}
+
+  .stack{list-style:none;padding:0;margin:0;display:grid;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .stack li{background:var(--white);padding:18px 20px}
+  .stack .tag{font-family:var(--mono);font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--shelf)}
+  .stack p{margin:6px 0 0;font-size:15px;color:var(--slate)}
+
+  table{width:100%;border-collapse:collapse;font-size:15px;margin-top:8px}
+  th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line)}
+  th{font-family:var(--mono);font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--slate);font-weight:500}
+  td:last-child,th:last-child{text-align:right;font-family:var(--mono)}
+
+  .shots{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin-top:8px}
+  .shot{background:#fff;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .shot img{width:100%;display:block}
+  .shot figcaption{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--slate);padding:12px 14px;border-top:1px solid var(--line)}
+
+  .links{display:flex;flex-wrap:wrap;gap:12px;margin-top:4px}
+  .btn{
+    display:inline-block;font-family:var(--mono);font-size:13px;letter-spacing:.04em;
+    text-decoration:none;padding:13px 20px;border-radius:4px;border:1px solid var(--ink);
+    color:var(--ink);background:transparent;transition:background .15s,color .15s
+  }
+  .btn:hover{background:var(--ink);color:#fff}
+  .btn-primary{background:var(--ink);color:#fff}
+  .btn-primary:hover{background:var(--robot);border-color:var(--robot)}
+  a:focus-visible,.btn:focus-visible{outline:2px solid var(--robot);outline-offset:3px}
+
+  footer{background:var(--ink);color:#8FA0BE;padding:40px 0;font-family:var(--mono);font-size:12.5px;line-height:1.9}
+  footer b{color:#fff;font-weight:500}
+
+  @media (max-width:860px){
+    .hero-grid{grid-template-columns:1fr;gap:36px}
+    .cols{grid-template-columns:1fr;gap:28px}
+    .metrics-row{grid-template-columns:1fr;}
+    .metric{border-right:0;border-bottom:1px solid var(--line);padding:26px 0}
+    .metric:last-child{border-bottom:0}
+    .shots{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <p class="eyebrow">Projeto final de licenciatura · ISPGAYA</p>
+      <h1>BoxToCar
+        <em>Sistema de gestão de armazém com picking assistido</em>
+      </h1>
+      <p class="lede">O operador deixa de atravessar o armazém com a carga na mão. Recolhe o artigo, dá alguns passos até ao corredor, e é aí que o robô o vai buscar.</p>
+      <p class="meta">
+        <b>Autor</b> &nbsp;Luís Rafael<br>
+        <b>Curso</b> &nbsp;Engenharia Informática<br>
+        <b>Orientador</b> &nbsp;Fernando Luís Ferreira de Almeida<br>
+        <b>Ano letivo</b> &nbsp;3º ano
+      </p>
+    </div>
+
+    <figure class="figure">
+      <!-- Grelha 7x6. Corredor principal na linha 2. Prateleiras a azul. -->
+      <svg viewBox="0 0 308 264" role="img" aria-labelledby="gridTitle gridDesc">
+        <title id="gridTitle">Planta do armazém com o ponto de encontro</title>
+        <desc id="gridDesc">Grelha de sete por seis células. O robô parte do depósito e percorre o corredor principal. O operador recolhe o artigo numa prateleira e desce até ao corredor. Ambos se encontram no ponto de encontro.</desc>
+
+        <g stroke="#E7EAEF" fill="none">
+          <path d="M0 0h308M0 44h308M0 88h308M0 132h308M0 176h308M0 220h308M0 264h308"/>
+          <path d="M0 0v264M44 0v264M88 0v264M132 0v264M176 0v264M220 0v264M264 0v264M308 0v264"/>
+        </g>
+
+        <!-- corredor principal (linha 2) -->
+        <rect x="0" y="88" width="308" height="44" fill="#101A2E" opacity="0.04"/>
+
+        <!-- prateleiras -->
+        <g fill="#2F5DA8" opacity="0.16">
+          <rect x="44" y="0" width="88" height="88"/>
+          <rect x="176" y="0" width="88" height="88"/>
+          <rect x="44" y="132" width="88" height="88"/>
+          <rect x="176" y="132" width="88" height="88"/>
+        </g>
+
+        <!-- prateleira-alvo -->
+        <rect x="176" y="176" width="44" height="44" fill="#2F5DA8" opacity="0.42"/>
+        <text x="198" y="204" font-family="DM Mono,monospace" font-size="13" fill="#FFFFFF" text-anchor="middle">S</text>
+
+        <!-- depósito -->
+        <rect x="0" y="88" width="44" height="44" fill="#101A2E" opacity="0.82"/>
+        <text x="22" y="116" font-family="DM Mono,monospace" font-size="13" fill="#FFFFFF" text-anchor="middle">D</text>
+
+        <!-- rota do robô: D -> M -->
+        <polyline class="route route-robot" style="--len:132" points="22,110 154,110"/>
+        <!-- rota do operador: S -> corredor -> M -->
+        <polyline class="route route-op" style="--len:132" points="198,198 154,198 154,110"/>
+
+        <!-- ponto de encontro -->
+        <g class="meet">
+          <circle cx="154" cy="110" r="11" fill="#FFFFFF" stroke="#101A2E" stroke-width="2"/>
+          <text x="154" y="115" font-family="DM Mono,monospace" font-size="11" fill="#101A2E" text-anchor="middle">M</text>
+        </g>
+      </svg>
+      <div class="legend">
+        <span><i class="swatch" style="background:#D33F49"></i>Rota do robô</span>
+        <span><i class="swatch" style="background:#1E8E5A"></i>Operador com carga</span>
+        <span><i class="dot" style="background:#101A2E"></i>D depósito</span>
+        <span><i class="dot" style="background:#fff;border:2px solid #101A2E"></i>M ponto de encontro</span>
+      </div>
+    </figure>
+  </div>
+</header>
+
+
+<main>
+<section id="problema">
+  <div class="wrap cols">
+    <div>
+      <p class="eyebrow">O problema</p>
+      <h2>Andar às voltas com caixas na mão</h2>
+      <p>Na recolha manual de encomendas, o operador percorre o armazém, recolhe os artigos e transporta-os até à zona de expedição. Grande parte do esforço não está na recolha em si, mas no transporte da carga ao longo de todo o percurso de regresso.</p>
+      <p>A automação total resolve o problema, mas exige robôs reais, navegação, deteção de colisões e um investimento que a maioria dos armazéns pequenos não faz.</p>
+    </div>
+    <div>
+      <p class="eyebrow">A abordagem</p>
+      <h2>Dividir o percurso entre os dois</h2>
+      <p>O BoxToCar mantém a flexibilidade da recolha manual e retira ao operador a parte pesada. O sistema calcula um <strong>ponto de encontro</strong> no corredor principal: o operador leva o artigo até lá, o robô vai buscá-lo e leva-o ao depósito.</p>
+      <p>O critério é assimétrico de propósito — minimiza a distância que o <em>humano</em> percorre com carga, aceitando que o robô ande mais. É o robô que não se cansa.</p>
+    </div>
+  </div>
+</section>
+
+<section id="arquitetura">
+  <div class="wrap">
+    <p class="eyebrow">Arquitetura</p>
+    <h2>Três componentes, uma API</h2>
+    <p>Os clientes comunicam com a mesma API REST, partilhando dados e regras de negócio.</p>
+    <ul class="stack">
+      <li>
+        <span class="tag">Backend · Node.js + Express</span>
+        <h3>O núcleo do sistema</h3>
+        <p>Expõe a API REST, comunica com a base de dados e concentra a lógica de coordenação.</p>
+      </li>
+      <li>
+        <span class="tag">Base de dados · MySQL</span>
+        <h3>Planta, stock e encomendas</h3>
+        <p>Guarda o layout do armazém, os produtos por prateleira e as ordens de picking. As operações com várias alterações correm dentro de transações.</p>
+      </li>
+      <li>
+        <span class="tag">Backoffice · HTML, CSS, JavaScript</span>
+        <h3>Mapa interativo do armazém</h3>
+        <p>O gestor constrói prateleiras, importa layouts em JSON, dá entrada de stock e vê a coordenação desenhada sobre o mapa.</p>
+      </li>
+      <li>
+        <span class="tag">Aplicação móvel · Flutter</span>
+        <h3>O lado do operador</h3>
+        <p>Mostra as tarefas pendentes, o ponto de encontro com o robô e a poupança de esforço. A recolha é confirmada no telemóvel.</p>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<section id="algoritmo">
+  <div class="wrap cols">
+    <div>
+      <p class="eyebrow">Coordenação</p>
+      <h2>Como se escolhe o ponto de encontro</h2>
+      <p>O armazém é representado como uma grelha 2D em que as prateleiras são obstáculos. Como não é possível atravessar as prateleiras, a distância em linha reta não serve: é preciso procurar caminho.</p>
+      <p>O sistema executa duas procuras em largura (BFS) — uma a partir da prateleira, outra a partir do depósito — e varre as células do corredor principal, escolhendo aquela que fica mais perto do operador. A grelha tem custo uniforme, pelo que a BFS devolve o caminho mais curto sem necessitar de heurística.</p>
+      <p>O custo é linear no número de células, O(L×C).</p>
+    </div>
+    <div>
+      <p class="eyebrow">Segurança</p>
+      <h2>Quem vê o quê</h2>
+      <p>A autenticação usa <strong>JWT</strong>, com o identificador do armazém dentro do token. Nenhum pedido pode indicar o armazém por parâmetro — é sempre derivado do token, o que impede um utilizador de ver dados de outro armazém.</p>
+      <p>As palavras-passe são guardadas como <em>hash</em> <strong>bcrypt</strong>. As consultas à base de dados são parametrizadas.</p>
+    </div>
+  </div>
+</section>
+
+<section id="resultados">
+  <div class="wrap">
+    <p class="eyebrow">Validação</p>
+    <h2>Resultados</h2>
+    <p>O algoritmo foi avaliado em dois layouts distintos, comparando a distância que o operador percorreria com carga sem apoio do robô com a distância até ao ponto de encontro.</p>
+    <table>
+      <thead>
+        <tr><th>Layout</th><th>Dimensão</th><th>Redução da distância com carga</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Armazém base</td><td>7 × 6</td><td>73% (média)</td></tr>
+        <tr><td>Layout alternativo</td><td>5 × 7</td><td>80% – 100%</td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:20px;color:var(--slate);font-size:15px">Os testes funcionais cobrem autenticação, isolamento entre armazéns, validação de stock e o cálculo do ponto de encontro.</p>
+  </div>
+</section>
+
+<section id="imagens">
+  <div class="wrap">
+    <p class="eyebrow">O sistema</p>
+    <h2>Interfaces</h2>
+    <div class="shots">
+      <figure class="shot">
+        <img src="img/mapa.png" alt="Backoffice web com o mapa interativo do armazém">
+        <figcaption>Backoffice — mapa do armazém</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="img/coordenacao.png" alt="Visualização da coordenação: ponto de encontro, rotas e métricas">
+        <figcaption>Coordenação — rotas e métricas</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="img/stock.png" alt="Entrada de produtos e simulador de ordens de picking">
+        <figcaption>Entrada de stock e simulador ERP</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="img/app.png" alt="Aplicação móvel do operador com a tarefa e o ponto de encontro">
+        <figcaption>Aplicação móvel do operador</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="ligacoes">
+  <div class="wrap">
+    <p class="eyebrow">Ligações</p>
+    <h2>Código e documentação</h2>
+    <p>O código-fonte está disponível no repositório. O relatório descreve a arquitetura, o algoritmo de coordenação e os resultados dos testes.</p>
+    <div class="links">
+      <a class="btn btn-primary" href="https://github.com/luismmrafa-art/wms-projeto">Repositório no GitHub</a>
+      <a class="btn" href="relatorio.pdf">Relatório (PDF)</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <b>BoxToCar</b> — Sistema de Gestão de Armazém com Picking Assistido<br>
+    Projeto final de licenciatura em Engenharia Informática<br>
+    Instituto Superior Politécnico Gaya (ISPGAYA) · 3º ano
+  </div>
+</footer>
+
+</body>
+</html>
