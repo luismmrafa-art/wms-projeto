@@ -3,7 +3,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken'); // Para criar/verificar os tokens de login
 const pool = require('./db'); // Agora chama o pool do MySQL
-const { planearRecolha, calcularDistanciasTarefa } = require('./coordenacao'); // BFS: distâncias e rotas
+const { planearRecolha, calcularDistanciasTarefa, prateleirasBloqueadas } = require('./coordenacao'); // BFS: distâncias e rotas
 const { obterOuCriarArtigo, resolverArtigoID, caberNaPrateleira } = require('./artigos'); // Dados mestre do artigo (peso, dimensões, frágil)
 const { listarTiposRobo, recomendarRobo, VELOCIDADE_HUMANO_MS } = require('./robos'); // Catálogo e recomendação de robôs (SAD)
 const { avaliarTarefa } = require('./custoDecisao'); // Decisão multicritério humano/robô
@@ -203,15 +203,43 @@ app.post('/api/produtos/novo', verificarToken, async (req, res) => {
 app.post('/api/prateleiras/nova', verificarToken, async (req, res) => {
     try {
         // Agora recebe também o armazemID
-        const { posX, posY, niveis } = req.body;
+        const posX = parseInt(req.body.posX);
+        const posY = parseInt(req.body.posY);
+        const niveis = req.body.niveis;
         const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
-        
+
+        const [existentes] = await pool.query('SELECT PosX, PosY FROM Prateleiras WHERE ArmazemID = ?', [armazemID]);
+
+        // Não deixa construir duas prateleiras na mesma célula
+        if (existentes.some(p => p.PosX === posX && p.PosY === posY)) {
+            return res.status(400).json({ erro: 'Já existe uma prateleira nessa posição.' });
+        }
+
+        // 🔒 Recusa se esta prateleira (ou uma já existente) ficasse sem nenhuma célula
+        // livre à volta: se não se consegue lá chegar para arrumar, também não se
+        // conseguiria voltar lá depois para recolher.
+        const [configs] = await pool.query('SELECT * FROM Configuracoes');
+        let maxX = existentes.reduce((m, p) => Math.max(m, p.PosX), posX);
+        let maxY = existentes.reduce((m, p) => Math.max(m, p.PosY), posY);
+        configs.forEach(c => {
+            if (c.Chave === 'largura') maxX = Math.max(maxX, c.Valor);
+            if (c.Chave === 'comprimento') maxY = Math.max(maxY, c.Valor);
+        });
+
+        const candidatas = [...existentes, { PosX: posX, PosY: posY }];
+        const bloqueadas = prateleirasBloqueadas(candidatas, maxX, maxY);
+        if (bloqueadas.length > 0) {
+            const lista = bloqueadas.map(b => `(${b.x},${b.y})`).join(', ');
+            return res.status(400).json({ erro: `Não é possível construir aqui: ficaria(m) sem nenhum acesso livre à volta: ${lista}.` });
+        }
+
         await pool.query(
-            'INSERT INTO Prateleiras (PosX, PosY, Niveis, ArmazemID) VALUES (?, ?, ?, ?)', 
+            'INSERT INTO Prateleiras (PosX, PosY, Niveis, ArmazemID) VALUES (?, ?, ?, ?)',
             [posX, posY, niveis, armazemID]
         );
         res.status(201).json({ mensagem: 'Prateleira construída!' });
     } catch (erro) {
+        console.error('Erro ao criar prateleira:', erro);
         res.status(500).json({ erro: 'Erro ao criar prateleira.' });
     }
 });
@@ -827,6 +855,30 @@ app.post('/api/armazem/importar', verificarToken, async (req, res) => {
         // Verifica se o que foi enviado é mesmo uma lista
         if (!Array.isArray(prateleiras)) {
             return res.status(400).json({ erro: 'Formato inválido. O ficheiro deve conter uma lista de prateleiras.' });
+        }
+
+        // 🔒 Valida ANTES de apagar o que já existe: nenhuma prateleira do ficheiro
+        // pode ficar sem nenhuma célula livre à volta, senão fica impossível de
+        // recolher depois de arrumada lá.
+        const semDuplicados = [];
+        const vistasValidacao = new Set();
+        for (const plat of prateleiras) {
+            const chave = `${plat.posX},${plat.posY}`;
+            if (vistasValidacao.has(chave)) continue;
+            vistasValidacao.add(chave);
+            semDuplicados.push({ PosX: plat.posX, PosY: plat.posY });
+        }
+        const [configsValidacao] = await pool.query('SELECT * FROM Configuracoes');
+        let maxXValidacao = semDuplicados.reduce((m, p) => Math.max(m, p.PosX), 1);
+        let maxYValidacao = semDuplicados.reduce((m, p) => Math.max(m, p.PosY), 1);
+        configsValidacao.forEach(c => {
+            if (c.Chave === 'largura') maxXValidacao = Math.max(maxXValidacao, c.Valor);
+            if (c.Chave === 'comprimento') maxYValidacao = Math.max(maxYValidacao, c.Valor);
+        });
+        const bloqueadasImportacao = prateleirasBloqueadas(semDuplicados, maxXValidacao, maxYValidacao);
+        if (bloqueadasImportacao.length > 0) {
+            const lista = bloqueadasImportacao.map(b => `(${b.x},${b.y})`).join(', ');
+            return res.status(400).json({ erro: `Planta rejeitada: ficaria(m) sem nenhum acesso livre à volta: ${lista}. Ajusta o layout e tenta de novo.` });
         }
 
         await conn.beginTransaction();

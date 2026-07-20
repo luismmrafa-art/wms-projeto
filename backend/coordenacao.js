@@ -76,6 +76,23 @@ function acessos(sx, sy, ocupadas, maxX, maxY) {
   return res;
 }
 
+// Verifica, num dado layout de prateleiras, quais ficariam SEM nenhuma célula
+// livre à volta — inacessíveis para arrumar ou para recolher (o operador não
+// tem onde se colocar junto delas). Usada para RECUSAR a construção de uma
+// prateleira nova antes de ela (ou uma vizinha já existente) ficar cercada:
+// se não se consegue lá chegar para arrumar, também não se conseguiria voltar
+// lá para recolher — a mesma grelha vale para os dois casos.
+function prateleirasBloqueadas(prateleiras, maxX, maxY) {
+  const ocupadas = new Set(prateleiras.map(p => CHAVE(p.PosX, p.PosY)));
+  const bloqueadas = [];
+  for (const p of prateleiras) {
+    if (acessos(p.PosX, p.PosY, ocupadas, maxX, maxY).length === 0) {
+      bloqueadas.push({ x: p.PosX, y: p.PosY });
+    }
+  }
+  return bloqueadas;
+}
+
 // Escolhe o depósito/ponto de expedição: célula (1,1) se livre, senão o
 // corredor livre mais próximo dela.
 function escolherDeposito(ocupadas, maxX, maxY) {
@@ -179,4 +196,4 @@ function planearRecolha({ prateleiras, maxX, maxY, alvoX, alvoY, deposito }) {
   };
 }
 
-module.exports = { planearRecolha, calcularDistanciasTarefa, bfs, ehCorredorPrincipal, escolherDeposito, reconstruirCaminho, acessos };
+module.exports = { planearRecolha, calcularDistanciasTarefa, bfs, ehCorredorPrincipal, escolherDeposito, reconstruirCaminho, acessos, prateleirasBloqueadas };
