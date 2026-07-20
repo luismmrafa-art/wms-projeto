@@ -73,6 +73,7 @@
 
     <div class="cabecalho">
         <h1><span class="logo-badge"><img src="logo.png" alt="Logo" class="logo-topo"></span>BoxToCar - Centro de Comando Lógico</h1>
+        <div id="codigoConviteBadge" style="position:absolute; left:24px; top:50%; transform:translateY(-50%); font-size:12px; color:#cdd6e5;"></div>
         <button class="btn-sair-topo" onclick="sair()">Sair do Sistema</button>
     </div>
 
@@ -105,7 +106,7 @@
             <div class="card">
                 <h3>📥 Entrada de Produto</h3>
                 <div style="display:flex; gap:5px">
-                    <div class="campo" style="flex:2"><label>Nome / SKU:</label><input type="text" id="prodNome" placeholder="Ex: Motor V8"></div>
+                    <div class="campo" style="flex:2"><label>Nome / SKU:</label><input type="text" id="prodNome" placeholder="Ex: Motor V8" onblur="carregarArtigoExistente()"></div>
                     <div class="campo" style="flex:1"><label>Qtd:</label><input type="number" id="prodQtd" value="1" min="1"></div>
                 </div>
                 <div style="display:flex; gap:5px">
@@ -113,7 +114,20 @@
                     <div class="campo"><label>Ir ao Y:</label><input type="number" id="prodY" value="1" min="1"></div>
                     <div class="campo"><label>Nível:</label><input type="number" id="prodNivel" value="1" min="0"></div>
                 </div>
+                <div style="display:flex; gap:5px">
+                    <div class="campo" style="flex:1"><label>Peso (kg):</label><input type="number" id="prodPeso" value="1" min="0" step="0.1"></div>
+                    <div class="campo" style="flex:1"><label>Comp. (cm):</label><input type="number" id="prodComprimento" value="20" min="0"></div>
+                </div>
+                <div style="display:flex; gap:5px; align-items:center;">
+                    <div class="campo" style="flex:1; margin-bottom:0;"><label>Larg. (cm):</label><input type="number" id="prodLargura" value="20" min="0"></div>
+                    <div class="campo" style="flex:1; margin-bottom:0; display:flex; align-items:center; gap:6px;"><input type="checkbox" id="prodFragil" style="width:auto; margin:0;"><label style="margin:0; white-space:nowrap;">Frágil</label></div>
+                </div>
                 <button class="btn-produto" onclick="guardarProduto()">ARRUMAR NO STOCK</button>
+            </div>
+            <div class="card">
+                <h3>🚚 Robô Recomendado (SAD)</h3>
+                <div id="roboRecomendado" style="font-size:13px; color:#555; margin-bottom:10px;">A carregar…</div>
+                <button onclick="carregarRecomendacaoRobo()" style="background:#457b9d;">ATUALIZAR RECOMENDAÇÃO</button>
             </div>
             <div class="card">
                 <h3>🛒 Simulador ERP (Múltiplos Itens)</h3>
@@ -131,6 +145,12 @@
                 <button onclick="importarMapa()" class="btn-produto" style="background:#457b9d; width:100%;">CONSTRUIR MAPA</button>
             </div>
         </div>
+    </div>
+
+    <div class="card" style="margin-top: 20px; width: 100%;">
+        <h3>🧮 Planeamento de Recolhas — Comparação de Algoritmos</h3>
+        <button onclick="compararAlgoritmosPlaneamento()" class="btn-produto" style="background:#1d3557; max-width:340px;">CALCULAR (Exato · Guloso · Meta-heurística)</button>
+        <div id="resultadoAlgoritmos" style="margin-top:14px; font-size:14px;"></div>
     </div>
 
     <div class="card" style="margin-top: 20px; width: 100%;">
@@ -403,6 +423,31 @@
             }
         }
 
+        // Quando o nome escrito corresponde a um artigo já existente neste armazém,
+        // pré-preenche peso/dimensões/frágil com os valores reais guardados — assim,
+        // ao arrumar mais stock do mesmo artigo, o formulário não os repõe para os
+        // valores por omissão (1 kg / 20x20 cm) só por o utilizador não os ter mudado.
+        async function carregarArtigoExistente() {
+            const nome = document.getElementById('prodNome').value.trim();
+            if (!nome) return;
+            try {
+                const res = await fetch(`/api/artigos/procurar?nome=${encodeURIComponent(nome)}`);
+                const artigo = await res.json();
+                if (artigo) {
+                    document.getElementById('prodPeso').value = artigo.PesoKg;
+                    document.getElementById('prodComprimento').value = artigo.ComprimentoCm;
+                    document.getElementById('prodLargura').value = artigo.LarguraCm;
+                    document.getElementById('prodFragil').checked = !!artigo.Fragil;
+                } else {
+                    // Artigo novo: repõe os valores por omissão para não herdar os do artigo anterior
+                    document.getElementById('prodPeso').value = '1';
+                    document.getElementById('prodComprimento').value = '20';
+                    document.getElementById('prodLargura').value = '20';
+                    document.getElementById('prodFragil').checked = false;
+                }
+            } catch (e) { /* silencioso: não bloqueia a entrada de stock */ }
+        }
+
         async function guardarProduto() {
             limparCoordenacao();
             const nome = document.getElementById('prodNome').value;
@@ -410,6 +455,10 @@
             const posY = parseInt(document.getElementById('prodY').value);
             const nivel = parseInt(document.getElementById('prodNivel').value);
             const quantidade = parseInt(document.getElementById('prodQtd').value) || 1;
+            const pesoKg = parseFloat(document.getElementById('prodPeso').value) || 1;
+            const comprimentoCm = parseFloat(document.getElementById('prodComprimento').value) || 20;
+            const larguraCm = parseFloat(document.getElementById('prodLargura').value) || 20;
+            const fragil = document.getElementById('prodFragil').checked;
 
             // 🔑 1. O código vai buscar a chave ao bolso do browser
             const armazemID = sessionStorage.getItem('armazemID');
@@ -420,18 +469,83 @@
             const res = await fetch('/api/produtos/novo', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                // 🔑 2. A chave é enviada dentro deste pacote para o servidor!
-                body: JSON.stringify({ nome, posX, posY, nivel, quantidade, armazemID })
+                // 🔑 2. A chave é enviada dentro deste pacote para o servidor! Inclui as
+                // características físicas do artigo (peso/dimensões/frágil) usadas pela
+                // decisão multicritério humano/robô.
+                body: JSON.stringify({ nome, posX, posY, nivel, quantidade, armazemID, pesoKg, comprimentoCm, larguraCm, fragil })
             });
 
             if(res.ok) {
                 document.getElementById('prodNome').value = '';
                 document.getElementById('prodQtd').value = '1';
+                document.getElementById('prodFragil').checked = false;
                 carregarMapa();
                 moverRobo(posX, posY);
-            } else { 
+                carregarRecomendacaoRobo();
+            } else {
                 const erro = await res.json();
-                alert("❌ Erro: " + (erro.erro || "Falha ao guardar.")); 
+                alert("❌ Erro: " + (erro.erro || "Falha ao guardar."));
+            }
+        }
+
+        // --- RECOMENDAÇÃO DE ROBÔ (Sistema de Apoio à Decisão) ---
+        async function carregarRecomendacaoRobo() {
+            const div = document.getElementById('roboRecomendado');
+            try {
+                const res = await fetch('/api/robos/recomendar');
+                const r = await res.json();
+                if (!r.recomendado) {
+                    div.innerHTML = '<span style="color:#e63946;">Nenhum robô do catálogo é compatível com este armazém.</span>';
+                    return;
+                }
+                const rec = r.recomendado;
+                div.innerHTML = `
+                    <div style="font-weight:700; color:#1d3557;">${rec.Nome}</div>
+                    <div> ${rec.CapacidadeCargaKg} kg &nbsp;·&nbsp;  ${rec.VelocidadeMS} m/s &nbsp;·&nbsp;  ${rec.TipoNavegacao}</div>
+                    <div style="margin-top:4px; font-size:12px; color:#666;">${rec.motivo}</div>
+                `;
+            } catch (e) {
+                div.innerHTML = '<span style="color:#e63946;">Erro ao calcular a recomendação.</span>';
+            }
+        }
+
+        // --- COMPARAÇÃO DOS 3 ALGORITMOS DE PLANEAMENTO ---
+        async function compararAlgoritmosPlaneamento() {
+            const div = document.getElementById('resultadoAlgoritmos');
+            div.innerHTML = 'A calcular…';
+            try {
+                const res = await fetch('/api/planeamento/otimizar');
+                const r = await res.json();
+                if (r.erro) { div.innerHTML = `<span style="color:#e63946;">${r.erro}</span>`; return; }
+                if (!r.totalTarefas) { div.innerHTML = 'Não há tarefas pendentes com localização conhecida para planear.'; return; }
+
+                const linhas = ['exato', 'guloso', 'metaheuristica'].map(k => {
+                    const a = r[k];
+                    if (!a || a.inviavel) return `<tr><td style="padding:8px;"><b>${k}</b></td><td colspan="3" style="padding:8px; color:#999;">${a ? a.motivo : 'sem resultado'}</td></tr>`;
+                    return `<tr>
+                        <td style="padding:8px;"><b>${a.algoritmo}</b></td>
+                        <td style="padding:8px;">${a.custoTotal.toFixed(2)} s</td>
+                        <td style="padding:8px;">${a.tempoCalculoMs} ms</td>
+                        <td style="padding:8px;">${a.ordem.length}</td>
+                    </tr>`;
+                }).join('');
+
+                div.innerHTML = `
+                    <div style="margin-bottom:8px; font-size:13px; color:#666;">
+                        Robô considerado: <b>${r.robo ? r.robo.Nome : 'nenhum compatível'}</b> · ${r.totalTarefas} tarefa(s) planeada(s)${r.semLocalizacao ? ` · ${r.semLocalizacao} sem localização conhecida` : ''}
+                    </div>
+                    <table style="width:100%; border-collapse:collapse;">
+                        <thead><tr style="background:#f8f9fa; border-bottom:2px solid #ddd;">
+                            <th style="padding:8px; text-align:left;">Algoritmo</th>
+                            <th style="padding:8px; text-align:left;">Custo total</th>
+                            <th style="padding:8px; text-align:left;">Tempo de cálculo</th>
+                            <th style="padding:8px; text-align:left;">Nº tarefas</th>
+                        </tr></thead>
+                        <tbody>${linhas}</tbody>
+                    </table>
+                `;
+            } catch (e) {
+                div.innerHTML = 'Erro ao calcular.';
             }
         }
 
@@ -439,7 +553,7 @@
         function abrirModal(plat, prods) {
             document.getElementById('modalTitulo').innerText = `X:${plat.PosX} Y:${plat.PosY} | Altura: ${plat.Niveis}`;
             const divConteudo = document.getElementById('modalConteudo');
-            divConteudo.innerHTML = prods.length===0 ? '<p>Vazio</p>' : prods.map(p => `<div class="item-produto"><b>Nv${p.Nivel}:</b> ${p.Nome} <button class="btn-lixo" onclick="apagarProduto(${p.ID})">🗑️</button></div>`).join('');
+            divConteudo.innerHTML = prods.length===0 ? '<p>Vazio</p>' : prods.map(p => `<div class="item-produto"><span><b>Nv${p.Nivel}:</b> ${p.Nome} <small style="color:#888;">(${p.PesoKg ?? '?'} kg${p.Fragil ? ' · ⚠️ frágil' : ''})</small></span><button class="btn-lixo" onclick="apagarProduto(${p.ID})">🗑️</button></div>`).join('');
             
             document.getElementById('btnDestruir').onclick = () => apagarPrateleira(plat.ID);
             document.getElementById('btnChamarRobo').onclick = () => moverRobo(plat.PosX, plat.PosY);
@@ -486,6 +600,12 @@
 
                 // Mostra as métricas
                 const m = p.metricas;
+                const decisaoHTML = p.decisao ? `
+                    <hr style="border:none;border-top:1px solid #eee;margin:8px 0;">
+                    <div>${p.decisao.atribuicao === 'humano_robo' ? '🤝 Decisão: <b>Humano + Robô</b>' : '🚶 Decisão: <b>Humano sozinho</b>'} ${p.robo ? '(' + p.robo.Nome + ')' : ''}</div>
+                    <div style="font-size:12px;color:#666;">${p.decisao.motivo}</div>
+                    ${p.artigo ? `<div style="font-size:12px;color:#666;">📦 ${p.artigo.PesoKg} kg${p.artigo.Fragil ? ' · ⚠️ frágil' : ''}</div>` : ''}
+                ` : '';
                 document.getElementById('coordConteudo').innerHTML = `
                     <div>📦 Prateleira: <b>X${p.prateleira.x} Y${p.prateleira.y}</b></div>
                     <div>🤝 Ponto de encontro: <b>X${p.pontoEncontro.x} Y${p.pontoEncontro.y}</b></div>
@@ -493,7 +613,8 @@
                     <div>🚶 Operador com carga: <b>${m.operadorComCarga}</b> passos</div>
                     <div>🚚 Robô até ao encontro: <b>${m.roboAteEncontro}</b> passos</div>
                     <div>📉 Sem robô (até à expedição): <b>${m.operadorSemRobo}</b> passos</div>
-                    <div style="margin-top:6px;color:#2a9d8f;font-weight:700;">✅ Poupança ao operador: ${m.poupancaOperador} passos (${m.poupancaPercent}%)</div>`;
+                    <div style="margin-top:6px;color:#2a9d8f;font-weight:700;">✅ Poupança ao operador: ${m.poupancaOperador} passos (${m.poupancaPercent}%)</div>
+                    ${decisaoHTML}`;
                 document.getElementById('painelCoord').style.display = 'block';
             } catch (e) {
                 alert('Erro ao calcular a coordenação.');
@@ -687,10 +808,21 @@
         }, 2000); // 2000 milissegundos = Pergunta ao servidor de 2 em 2 segundos
 
 
+        // 🔑 Mostra o código de convite deste armazém (para partilhar com os operadores)
+        async function carregarCodigoConvite() {
+            try {
+                const res = await fetch('/api/armazem/codigo-convite');
+                const r = await res.json();
+                if (r.codigoConvite) document.getElementById('codigoConviteBadge').innerText = `🔑 Código de convite: ${r.codigoConvite}`;
+            } catch (e) {}
+        }
+
         // --- ARRANQUE DO SISTEMA ---
         verificarSeguranca(); // Garante que só o Gestor entra
         carregarMapa();       // Desenha o Armazém e as prateleiras
         carregarVendas();     // 🌟 Carrega a tabela de vendas 🌟
+        carregarRecomendacaoRobo(); //  Recomendação de robô para este armazém (SAD)
+        carregarCodigoConvite();
         setInterval(carregarVendas, 5000); // 🌟 Atualiza as vendas a cada 5 segundos para o Gestor ter feedback live 🌟
     </script>
 </body>

@@ -3,7 +3,11 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken'); // Para criar/verificar os tokens de login
 const pool = require('./db'); // Agora chama o pool do MySQL
-const { planearRecolha } = require('./coordenacao'); // Cérebro da coordenação humano-máquina
+const { planearRecolha, calcularDistanciasTarefa } = require('./coordenacao'); // BFS: distâncias e rotas
+const { obterOuCriarArtigo, resolverArtigoID } = require('./artigos'); // Dados mestre do artigo (peso, dimensões, frágil)
+const { listarTiposRobo, recomendarRobo, VELOCIDADE_HUMANO_MS } = require('./robos'); // Catálogo e recomendação de robôs (SAD)
+const { avaliarTarefa } = require('./custoDecisao'); // Decisão multicritério humano/robô
+const { compararAlgoritmos } = require('./algoritmos'); // Os 3 algoritmos: exato, guloso, meta-heurística
 require('dotenv').config();
 
 const JWT_SECRET = process.env.JWT_SECRET; // Segredo que assina os tokens (vem do .env)
@@ -47,30 +51,38 @@ function gerarToken(utilizador) {
 }
 
 
+// Tarefas de picking pendentes de um armazém, com os atributos do artigo
+// (peso/dimensões/frágil) já ligados por ArtigoID — reutilizada pelo endpoint
+// do operador (app) e pelo planeamento em lote (comparação dos 3 algoritmos).
+async function buscarTarefasPendentes(armazemID) {
+    const sql = `
+        SELECT
+            e.ID as TarefaID,
+            a.Nome as Nome,
+            e.Quantidade,
+            a.PesoKg, a.Fragil, a.ComprimentoCm, a.LarguraCm, a.AlturaCm,
+            p.PosX,
+            p.PosY,
+            pr.Nivel
+        FROM Encomendas e
+        JOIN Artigos a ON a.ID = e.ArtigoID
+        LEFT JOIN Produtos pr ON pr.ArtigoID = e.ArtigoID AND pr.ArmazemID = e.ArmazemID
+        LEFT JOIN Prateleiras p ON pr.PrateleiraID = p.ID
+        WHERE e.Estado = 'Pendente' AND e.ArmazemID = ?
+        GROUP BY e.ID
+    `;
+    const [tarefas] = await pool.query(sql, [armazemID]);
+    return tarefas.map(t => ({ ...t, Produto: t.Nome, PesoKg: Number(t.PesoKg) }));
+}
+
 // 📱 APP DO OPERADOR: Buscar lista de tarefas
 app.get('/api/tarefas/pendentes', verificarToken, async (req, res) => {
     try {
         const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
+        const tarefas = await buscarTarefasPendentes(armazemID);
 
-        const sql = `
-            SELECT 
-                e.ID as TarefaID, 
-                e.ProdutoNome as Produto, 
-                e.Quantidade, 
-                p.PosX, 
-                p.PosY, 
-                pr.Nivel
-            FROM Encomendas e
-            LEFT JOIN Produtos pr ON e.ProdutoNome = pr.Nome AND e.ArmazemID = pr.ArmazemID
-            LEFT JOIN Prateleiras p ON pr.PrateleiraID = p.ID
-            WHERE e.Estado = 'Pendente' AND e.ArmazemID = ?
-            GROUP BY e.ID
-        `;
-        
-        const [tarefas] = await pool.query(sql, [armazemID]);
-        
         // 🚨 CORREÇÃO: Devolvemos sempre a lista (mesmo que esteja vazia) para o Flutter ficar feliz!
-        res.json(tarefas); 
+        res.json(tarefas);
 
     } catch (erro) {
         console.error("🚨 Erro a buscar tarefas:", erro.message);
@@ -92,8 +104,14 @@ app.get('/api/inventario', verificarToken, async (req, res) => {
 
         // Filtramos com WHERE ArmazemID = ?
         const [prateleiras] = await pool.query('SELECT * FROM Prateleiras WHERE ArmazemID = ?', [armazemId]);
-        const [produtos] = await pool.query('SELECT * FROM Produtos WHERE ArmazemID = ?', [armazemId]);
-        
+        // 📦 Junta os atributos do artigo (peso, dimensões, frágil) via ArtigoID
+        const [produtos] = await pool.query(`
+            SELECT p.*, a.PesoKg, a.Fragil, a.ComprimentoCm, a.LarguraCm, a.AlturaCm
+            FROM Produtos p
+            JOIN Artigos a ON a.ID = p.ArtigoID
+            WHERE p.ArmazemID = ?
+        `, [armazemId]);
+
         res.json({ prateleiras, produtos });
     } catch (erro) {
         res.status(500).json({ erro: 'Erro ao carregar o mapa.' });
@@ -104,7 +122,7 @@ app.get('/api/inventario', verificarToken, async (req, res) => {
 // Rota para o Dashboard: Dar entrada de um Produto Novo
 app.post('/api/produtos/novo', verificarToken, async (req, res) => {
     try {
-        const { nome, posX, posY, nivel } = req.body;
+        const { nome, posX, posY, nivel, pesoKg, comprimentoCm, larguraCm, alturaCm, fragil } = req.body;
         const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
 
         // Quantidade de unidades a arrumar (1 por defeito). Cada unidade é uma linha.
@@ -132,10 +150,20 @@ app.post('/api/produtos/novo', verificarToken, async (req, res) => {
             return res.status(400).json({ erro: `Essa prateleira só tem ${prateleira.Niveis} andares!` });
         }
 
-        // 3. Insere uma linha por cada unidade (INSERT múltiplo)
-        const valores = Array.from({ length: quantidade }, () => [nome, prateleira.ID, nivel, armazemID]);
+        // 3. Regista/atualiza o artigo (peso, dimensões, frágil) — dados mestre do SKU
+        const artigo = await obterOuCriarArtigo(pool, {
+            armazemID, nome,
+            pesoKg: pesoKg !== undefined ? parseFloat(pesoKg) : undefined,
+            comprimentoCm: comprimentoCm !== undefined ? parseFloat(comprimentoCm) : undefined,
+            larguraCm: larguraCm !== undefined ? parseFloat(larguraCm) : undefined,
+            alturaCm: alturaCm !== undefined ? parseFloat(alturaCm) : undefined,
+            fragil: fragil !== undefined ? !!fragil && fragil !== 'false' && fragil !== '0' : undefined,
+        });
+
+        // 4. Insere uma linha por cada unidade (INSERT múltiplo), ligada ao artigo por FK
+        const valores = Array.from({ length: quantidade }, () => [nome, prateleira.ID, nivel, armazemID, artigo.ID]);
         await pool.query(
-            'INSERT INTO Produtos (Nome, PrateleiraID, Nivel, ArmazemID) VALUES ?',
+            'INSERT INTO Produtos (Nome, PrateleiraID, Nivel, ArmazemID, ArtigoID) VALUES ?',
             [valores]
         );
 
@@ -284,10 +312,12 @@ app.post('/api/registo', async (req, res) => {
 
         await conn.beginTransaction();
 
-        // 1. Cria o armazém novo
+        // 1. Cria o armazém novo, com um código de convite único (para os
+        // operadores se poderem registar — ver /api/operador/registo)
+        const codigoConvite = Math.random().toString(36).slice(2, 8).toUpperCase();
         const [resArmazem] = await conn.query(
-            'INSERT INTO Armazens (Nome, Cidade) VALUES (?, ?)',
-            [nomeArmazem, cidade || null]
+            'INSERT INTO Armazens (Nome, Cidade, CodigoConvite) VALUES (?, ?, ?)',
+            [nomeArmazem, cidade || null, codigoConvite]
         );
         const armazemID = resArmazem.insertId;
 
@@ -299,7 +329,10 @@ app.post('/api/registo', async (req, res) => {
         );
 
         await conn.commit();
-        res.status(201).json({ mensagem: `Armazém "${nomeArmazem}" criado! Já podes fazer login como Gestor.` });
+        res.status(201).json({
+            mensagem: `Armazém "${nomeArmazem}" criado! Já podes fazer login como Gestor.`,
+            codigoConvite,
+        });
     } catch (erro) {
         await conn.rollback();
         console.error("Erro no registo:", erro);
@@ -324,16 +357,17 @@ app.get('/api/armazens', async (req, res) => {
 // Vários operadores podem partilhar o mesmo ArmazemID.
 app.post('/api/operador/registo', async (req, res) => {
     try {
-        const { nome, email, senha, armazemID } = req.body;
+        const { nome, email, senha, armazemID, codigoConvite } = req.body;
 
-        if (!nome || !email || !senha || !armazemID) {
-            return res.status(400).json({ erro: 'Preenche todos os campos e escolhe um armazém.' });
+        if (!nome || !email || !senha || !armazemID || !codigoConvite) {
+            return res.status(400).json({ erro: 'Preenche todos os campos, escolhe um armazém e indica o código de convite (pede-o ao gestor).' });
         }
 
-        // O armazém escolhido tem de existir
-        const [armazem] = await pool.query('SELECT ID FROM Armazens WHERE ID = ?', [armazemID]);
+        // 🔒 O armazém tem de existir E o código de convite tem de coincidir
+        // (fecha o registo público: sem o código, não se cria conta neste armazém).
+        const [armazem] = await pool.query('SELECT ID FROM Armazens WHERE ID = ? AND CodigoConvite = ?', [armazemID, String(codigoConvite).trim().toUpperCase()]);
         if (armazem.length === 0) {
-            return res.status(404).json({ erro: 'Esse armazém não existe.' });
+            return res.status(403).json({ erro: 'Armazém não encontrado ou código de convite incorreto.' });
         }
 
         // Email único
@@ -372,11 +406,13 @@ app.get('/api/loja/produtos', async (req, res) => {
 // 🛍️ ROTA DA LOJA: O cliente clica em "Comprar"
 app.post('/api/loja/comprar', async (req, res) => {
     try {
-        const { produtoNome } = req.body;
+        const { produtoNome, armazemID } = req.body;
+        if (!armazemID) return res.status(400).json({ erro: 'Falta o armazém.' });
 
-        // Guarda a encomenda (o que foi comprado)
-        await pool.query('INSERT INTO Encomendas (ProdutoNome, Estado) VALUES (?, "Pendente")', [produtoNome]);
-        
+        // Liga a encomenda ao artigo por ArtigoID (FK), não só pelo nome
+        const artigoID = await resolverArtigoID(pool, armazemID, produtoNome);
+        await pool.query('INSERT INTO Encomendas (ProdutoNome, ArtigoID, Estado, ArmazemID) VALUES (?, ?, "Pendente", ?)', [produtoNome, artigoID, armazemID]);
+
         res.status(200).json({ mensagem: `Boa! Compraste um ${produtoNome}. O armazém já foi avisado!` });
     } catch (erro) {
         console.error("Erro na Compra:", erro);
@@ -420,17 +456,23 @@ app.post('/api/encomendas/carrinho', verificarToken, async (req, res) => {
 
         // Guarda o que já foi reservado dentro deste próprio carrinho (caso o mesmo produto apareça 2x)
         const reservadoNesteCarrinho = {};
+        // Resolve o ArtigoID de cada nome uma única vez (cria o artigo se for novo, com valores por omissão)
+        const artigoIDPorNome = {};
+        for (let item of carrinho) {
+            artigoIDPorNome[item.nome] = await resolverArtigoID(conn, armazemID, item.nome);
+        }
 
         for (let item of carrinho) {
+            const artigoID = artigoIDPorNome[item.nome];
             // Stock físico no armazém
             const [stock] = await conn.query(
-                'SELECT COUNT(*) as total FROM Produtos WHERE Nome = ? AND ArmazemID = ? FOR UPDATE',
-                [item.nome, armazemID]
+                'SELECT COUNT(*) as total FROM Produtos WHERE ArtigoID = ? AND ArmazemID = ? FOR UPDATE',
+                [artigoID, armazemID]
             );
             // Quantidade já comprometida em encomendas ainda Pendentes (reservada, mas não recolhida)
             const [reservado] = await conn.query(
-                "SELECT COALESCE(SUM(Quantidade), 0) as total FROM Encomendas WHERE ProdutoNome = ? AND ArmazemID = ? AND Estado = 'Pendente'",
-                [item.nome, armazemID]
+                "SELECT COALESCE(SUM(Quantidade), 0) as total FROM Encomendas WHERE ArtigoID = ? AND ArmazemID = ? AND Estado = 'Pendente'",
+                [artigoID, armazemID]
             );
 
             const disponivel = stock[0].total - reservado[0].total - (reservadoNesteCarrinho[item.nome] || 0);
@@ -447,8 +489,8 @@ app.post('/api/encomendas/carrinho', verificarToken, async (req, res) => {
 
         for (let item of carrinho) {
             await conn.query(
-                'INSERT INTO Encomendas (ProdutoNome, Quantidade, Estado, Data, ArmazemID) VALUES (?, ?, "Pendente", NOW(), ?)',
-                [item.nome, item.qtd, armazemID]
+                'INSERT INTO Encomendas (ProdutoNome, ArtigoID, Quantidade, Estado, Data, ArmazemID) VALUES (?, ?, ?, "Pendente", NOW(), ?)',
+                [item.nome, artigoIDPorNome[item.nome], item.qtd, armazemID]
             );
         }
 
@@ -471,13 +513,13 @@ app.post('/api/operador/concluir', verificarToken, async (req, res) => {
 
         await conn.beginTransaction();
 
-        const [enc] = await conn.query('SELECT ProdutoNome, Quantidade, ArmazemID FROM Encomendas WHERE ID = ? FOR UPDATE', [encomendaId]);
+        const [enc] = await conn.query('SELECT ProdutoNome, ArtigoID, Quantidade, ArmazemID FROM Encomendas WHERE ID = ? FOR UPDATE', [encomendaId]);
         if (enc.length === 0) {
             await conn.rollback();
             return res.status(404).json({ erro: 'Encomenda não encontrada' });
         }
 
-        const { ProdutoNome, Quantidade, ArmazemID } = enc[0];
+        const { ProdutoNome, ArtigoID, Quantidade, ArmazemID } = enc[0];
 
         // 🔒 Garante que a encomenda pertence ao armazém deste operador (vem do token)
         if (ArmazemID !== req.utilizador.armazemID) {
@@ -485,16 +527,17 @@ app.post('/api/operador/concluir', verificarToken, async (req, res) => {
             return res.status(403).json({ erro: 'Esta encomenda não pertence ao teu armazém.' });
         }
 
+        // 🔗 Localiza a unidade física pelo ArtigoID (FK), não pelo nome
         const [posicao] = await conn.query(`
             SELECT p.PosX, p.PosY
             FROM Produtos prod
             JOIN Prateleiras p ON prod.PrateleiraID = p.ID
-            WHERE prod.Nome = ? AND prod.ArmazemID = ? LIMIT 1
-        `, [ProdutoNome, ArmazemID]);
+            WHERE prod.ArtigoID = ? AND prod.ArmazemID = ? LIMIT 1
+        `, [ArtigoID, ArmazemID]);
 
         const [stock] = await conn.query(
-            'SELECT COUNT(*) as total FROM Produtos WHERE Nome = ? AND ArmazemID = ? FOR UPDATE',
-            [ProdutoNome, ArmazemID]
+            'SELECT COUNT(*) as total FROM Produtos WHERE ArtigoID = ? AND ArmazemID = ? FOR UPDATE',
+            [ArtigoID, ArmazemID]
         );
 
         if (stock[0].total < Quantidade) {
@@ -503,7 +546,7 @@ app.post('/api/operador/concluir', verificarToken, async (req, res) => {
             return res.status(400).json({ erro: `RUTURA! A encomenda pede ${Quantidade}x ${ProdutoNome}, mas só tens ${stock[0].total}.` });
         }
 
-        await conn.query(`DELETE FROM Produtos WHERE Nome = ? AND ArmazemID = ? LIMIT ${Number(Quantidade)}`, [ProdutoNome, ArmazemID]);
+        await conn.query(`DELETE FROM Produtos WHERE ArtigoID = ? AND ArmazemID = ? LIMIT ${Number(Quantidade)}`, [ArtigoID, ArmazemID]);
         await conn.query('UPDATE Encomendas SET Estado = "Expedida" WHERE ID = ?', [encomendaId]);
 
         await conn.commit();
@@ -549,8 +592,8 @@ app.get('/api/coordenacao/plano', verificarToken, async (req, res) => {
                 SELECT p.PosX, p.PosY
                 FROM Produtos prod
                 JOIN Prateleiras p ON prod.PrateleiraID = p.ID
-                WHERE prod.Nome = ? AND prod.ArmazemID = ? LIMIT 1
-            `, [produtoNome, armazemID]);
+                WHERE prod.ArtigoID = (SELECT ID FROM Artigos WHERE Nome = ? AND ArmazemID = ?) AND prod.ArmazemID = ? LIMIT 1
+            `, [produtoNome, armazemID, armazemID]);
             if (pos.length === 0) {
                 return res.status(404).json({ erro: 'Produto não encontrado em nenhuma prateleira deste armazém.' });
             }
@@ -571,13 +614,133 @@ app.get('/api/coordenacao/plano', verificarToken, async (req, res) => {
         const plano = planearRecolha({ prateleiras, maxX, maxY, alvoX, alvoY });
         if (plano.erro) return res.status(400).json({ erro: plano.erro });
 
-        res.json({ produto: produtoNome || null, ...plano });
+        // 4. Características do artigo nesta prateleira (peso/dimensões/frágil)
+        const [artigoRows] = await pool.query(`
+            SELECT a.* FROM Produtos prod
+            JOIN Prateleiras p ON prod.PrateleiraID = p.ID
+            JOIN Artigos a ON a.ID = prod.ArtigoID
+            WHERE p.PosX = ? AND p.PosY = ? AND prod.ArmazemID = ? LIMIT 1
+        `, [alvoX, alvoY, armazemID]);
+        const artigo = artigoRows[0] || null;
+
+        // 5. Robô: o escolhido pelo gestor para este armazém, ou o recomendado (SAD)
+        const [armazemRows] = await pool.query('SELECT LarguraCorredorM, RoboTipoID FROM Armazens WHERE ID = ?', [armazemID]);
+        const armazem = armazemRows[0] || { LarguraCorredorM: 1.2, RoboTipoID: null };
+        const tiposRobo = await listarTiposRobo(pool);
+        let robo = armazem.RoboTipoID ? (tiposRobo.find(r => r.ID === armazem.RoboTipoID) || null) : null;
+        if (!robo) {
+            robo = recomendarRobo({ tiposRobo, larguraCorredorM: Number(armazem.LarguraCorredorM), tarefas: artigo ? [artigo] : [] }).recomendado;
+        }
+
+        // 6. Decisão multicritério: humano sozinho vs. humano+robô (não só distância)
+        const decisao = avaliarTarefa({
+            distanciaOperadorAteEncontro: plano.metricas.operadorComCarga,
+            distanciaRoboAteEncontro: plano.metricas.roboAteEncontro,
+            distanciaOperadorSemRobo: plano.metricas.operadorSemRobo,
+            velocidadeHumanoMS: VELOCIDADE_HUMANO_MS,
+            robo,
+            artigo: artigo || { PesoKg: 1, Fragil: 0 },
+        });
+
+        res.json({ produto: produtoNome || null, artigo, robo, decisao, ...plano });
     } catch (erro) {
         console.error('Erro na coordenação:', erro);
         res.status(500).json({ erro: 'Erro ao calcular a coordenação.' });
     }
 });
 
+
+// 🔑 CÓDIGO DE CONVITE deste armazém, para o gestor partilhar com os operadores
+app.get('/api/armazem/codigo-convite', verificarToken, async (req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT CodigoConvite FROM Armazens WHERE ID = ?', [req.utilizador.armazemID]);
+        res.json({ codigoConvite: rows[0]?.CodigoConvite || null });
+    } catch (erro) {
+        res.status(500).json({ erro: 'Erro ao carregar o código de convite.' });
+    }
+});
+
+// 🔍 PROCURAR ARTIGO: devolve os atributos (peso/dimensões/frágil) de um artigo já
+// existente neste armazém, para o formulário de entrada de stock não repor os
+// valores por omissão quando se arruma mais uma unidade de um artigo já conhecido.
+app.get('/api/artigos/procurar', verificarToken, async (req, res) => {
+    try {
+        const armazemID = req.utilizador.armazemID;
+        const nome = req.query.nome;
+        const [rows] = await pool.query('SELECT PesoKg, ComprimentoCm, LarguraCm, AlturaCm, Fragil FROM Artigos WHERE ArmazemID = ? AND Nome = ?', [armazemID, nome]);
+        res.json(rows[0] || null);
+    } catch (erro) {
+        res.status(500).json({ erro: 'Erro ao procurar o artigo.' });
+    }
+});
+
+// 🤖 CATÁLOGO DE ROBÔS: tipos disponíveis, com as suas especificações reais
+app.get('/api/robos/tipos', verificarToken, async (req, res) => {
+    try {
+        const tipos = await listarTiposRobo(pool);
+        res.json(tipos);
+    } catch (erro) {
+        res.status(500).json({ erro: 'Erro ao carregar o catálogo de robôs.' });
+    }
+});
+
+// 🤖 RECOMENDAÇÃO DE ROBÔ (SAD): dado o layout deste armazém (largura do
+// corredor) e as tarefas pendentes, recomenda o tipo de robô mais adequado.
+app.get('/api/robos/recomendar', verificarToken, async (req, res) => {
+    try {
+        const armazemID = req.utilizador.armazemID;
+        const [armazemRows] = await pool.query('SELECT LarguraCorredorM FROM Armazens WHERE ID = ?', [armazemID]);
+        const larguraCorredorM = Number(armazemRows[0]?.LarguraCorredorM ?? 1.2);
+
+        const tiposRobo = await listarTiposRobo(pool);
+        const tarefas = await buscarTarefasPendentes(armazemID);
+
+        const resultado = recomendarRobo({ tiposRobo, larguraCorredorM, tarefas });
+        res.json(resultado);
+    } catch (erro) {
+        console.error('Erro na recomendação de robô:', erro);
+        res.status(500).json({ erro: 'Erro ao calcular a recomendação de robô.' });
+    }
+});
+
+// 🧮 PLANEAMENTO EM LOTE: corre os 3 algoritmos (exato, guloso, meta-heurística)
+// sobre as tarefas pendentes deste armazém e devolve os resultados lado a
+// lado, para comparar tempo de cálculo e qualidade da solução (relatório, cap. 13).
+app.get('/api/planeamento/otimizar', verificarToken, async (req, res) => {
+    try {
+        const armazemID = req.utilizador.armazemID;
+
+        const [prateleiras] = await pool.query('SELECT PosX, PosY FROM Prateleiras WHERE ArmazemID = ?', [armazemID]);
+        const [configs] = await pool.query('SELECT * FROM Configuracoes');
+        let maxX = prateleiras.reduce((m, p) => Math.max(m, p.PosX), 1);
+        let maxY = prateleiras.reduce((m, p) => Math.max(m, p.PosY), 1);
+        configs.forEach(c => {
+            if (c.Chave === 'largura') maxX = Math.max(maxX, c.Valor);
+            if (c.Chave === 'comprimento') maxY = Math.max(maxY, c.Valor);
+        });
+
+        const todasTarefas = await buscarTarefasPendentes(armazemID);
+        // Só é possível planear geometricamente as que têm posição de prateleira conhecida.
+        const tarefas = todasTarefas.filter(t => Number.isInteger(t.PosX) && Number.isInteger(t.PosY));
+        const semLocalizacao = todasTarefas.length - tarefas.length;
+
+        const [armazemRows] = await pool.query('SELECT LarguraCorredorM, RoboTipoID FROM Armazens WHERE ID = ?', [armazemID]);
+        const armazem = armazemRows[0] || { LarguraCorredorM: 1.2, RoboTipoID: null };
+        const tiposRobo = await listarTiposRobo(pool);
+        let robo = armazem.RoboTipoID ? (tiposRobo.find(r => r.ID === armazem.RoboTipoID) || null) : null;
+        if (!robo) {
+            robo = recomendarRobo({ tiposRobo, larguraCorredorM: Number(armazem.LarguraCorredorM), tarefas }).recomendado;
+        }
+
+        const ctx = { prateleiras, maxX, maxY, deposito: undefined, robo, velocidadeHumanoMS: VELOCIDADE_HUMANO_MS };
+        const resultado = compararAlgoritmos(tarefas, ctx);
+
+        res.json({ totalTarefas: tarefas.length, semLocalizacao, robo, ...resultado });
+    } catch (erro) {
+        console.error('Erro no planeamento em lote:', erro);
+        res.status(500).json({ erro: 'Erro ao comparar os algoritmos de planeamento.' });
+    }
+});
 
 // 📂 IMPORTAR MAPA: Substitui TODA a planta do armazém (apaga a antiga primeiro)
 app.post('/api/armazem/importar', verificarToken, async (req, res) => {

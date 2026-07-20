@@ -1,16 +1,19 @@
 // ============================================================================
-// coordenacao.js — Coordenação Humano-Máquina (paradigma Indústria 5.0)
+// coordenacao.js — Cálculo de distâncias e rotas sobre a grelha (BFS)
 //
-// O "cérebro" logístico do BoxToCar. Dado o layout do armazém (grelha 2D) e a
-// prateleira a recolher, calcula, através de algoritmos exatos de procura em
-// grelha (BFS — caminho mais curto), o PONTO DE ENCONTRO eficiente entre o
-// operador humano e o robô virtual (AMR), bem como as rotas de ambos.
+// Esta é a peça de mais baixo nível do sistema: dado o layout do armazém
+// (grelha 2D), calcula distâncias e rotas entre pontos por procura em largura
+// (BFS — exata, mas ingénua; não decide nada por si). É usada por baixo dos
+// três algoritmos de planeamento (algoritmos.js — exato, guloso e
+// meta-heurística) e da decisão multicritério (custoDecisao.js), que são
+// quem efetivamente decide a atribuição humano/robô e a ordem das recolhas.
 //
-// Modelo: o robô circula pelo CORREDOR PRINCIPAL (perímetro da grelha — rotas
-// fixas e previsíveis); o operador vai à prateleira, recolhe o artigo (destreza)
-// e transporta-o apenas até ao ponto de encontro mais próximo no corredor, onde
-// o entrega ao robô (transporte pesado). O ponto de encontro é escolhido para
-// MINIMIZAR a distância percorrida pelo operador COM carga.
+// Modelo espacial: o robô circula pelo CORREDOR PRINCIPAL (perímetro da
+// grelha — rotas fixas e previsíveis, compatível com robôs de trilho fixo ou
+// perímetro do catálogo em robos.js); o operador vai à prateleira, recolhe o
+// artigo e, quando a decisão multicritério assim o determinar, transporta-o
+// apenas até ao ponto de encontro mais próximo no corredor, onde o entrega ao
+// robô.
 // ============================================================================
 
 const CHAVE = (x, y) => `${x},${y}`;
@@ -89,11 +92,14 @@ function escolherDeposito(ocupadas, maxX, maxY) {
 }
 
 // ----------------------------------------------------------------------------
-// planearRecolha: função principal (pura). Recebe as prateleiras, as dimensões,
-// a posição da prateleira-alvo e (opcionalmente) o depósito. Devolve o plano de
-// coordenação: ponto de encontro, rotas e métricas.
+// calcularDistanciasTarefa: núcleo puro de cálculo (sem opiniões sobre custo).
+// Dado o layout e uma prateleira-alvo, devolve o ponto de encontro no corredor
+// principal e as distâncias/rotas relevantes. É a peça reutilizada tanto pelo
+// endpoint de plano único como pelos três algoritmos de planeamento
+// (algoritmos.js), que decidem — usando custoDecisao.js — se vale a pena usar
+// o robô para cada tarefa.
 // ----------------------------------------------------------------------------
-function planearRecolha({ prateleiras, maxX, maxY, alvoX, alvoY, deposito }) {
+function calcularDistanciasTarefa({ prateleiras, maxX, maxY, alvoX, alvoY, deposito }) {
   const ocupadas = new Set(prateleiras.map(p => CHAVE(p.PosX, p.PosY)));
 
   if (!ocupadas.has(CHAVE(alvoX, alvoY))) {
@@ -112,44 +118,65 @@ function planearRecolha({ prateleiras, maxX, maxY, alvoX, alvoY, deposito }) {
   const { distancias: distAcesso, anteriores: antAcesso } = bfs(cellsAcesso, ocupadas, maxX, maxY);
 
   // 3. Ponto de encontro = célula do corredor principal com menor distância à recolha.
-  let pontoEncontro = null, distOperadorComCarga = Infinity;
+  let pontoEncontro = null, distOperadorAteEncontro = Infinity;
   for (const [k, d] of distAcesso) {
     const [x, y] = k.split(',').map(Number);
-    if (ehCorredorPrincipal(x, y, maxX, maxY) && d < distOperadorComCarga) {
-      distOperadorComCarga = d; pontoEncontro = { x, y };
+    if (ehCorredorPrincipal(x, y, maxX, maxY) && d < distOperadorAteEncontro) {
+      distOperadorAteEncontro = d; pontoEncontro = { x, y };
     }
   }
   // Se não houver corredor de perímetro alcançável, o encontro é o próprio acesso.
-  if (!pontoEncontro) { pontoEncontro = cellsAcesso[0]; distOperadorComCarga = 0; }
+  if (!pontoEncontro) { pontoEncontro = cellsAcesso[0]; distOperadorAteEncontro = 0; }
 
   // 4. Rota do robô: do depósito até ao ponto de encontro (algoritmo exato).
   const { distancias: distDep, anteriores: antDep } = bfs([dep], ocupadas, maxX, maxY);
-  const distRobo = distDep.get(CHAVE(pontoEncontro.x, pontoEncontro.y));
+  const distRoboAteEncontro = distDep.get(CHAVE(pontoEncontro.x, pontoEncontro.y));
   const rotaRobo = reconstruirCaminho(antDep, pontoEncontro);
 
   // 5. Rota do operador COM carga: da recolha até ao ponto de encontro.
   const rotaOperador = reconstruirCaminho(antAcesso, pontoEncontro);
 
-  // 6. Métricas de eficiência (Indústria 5.0):
-  //    - sem robô, o operador teria de transportar a carga até ao depósito.
-  const distSemRobo = distAcesso.get(CHAVE(dep.x, dep.y));
-  const poupanca = (distSemRobo != null) ? distSemRobo - distOperadorComCarga : null;
-  const poupancaPct = (distSemRobo && distSemRobo > 0) ? Math.round((poupanca / distSemRobo) * 100) : null;
+  // 6. Distância do operador se seguisse sozinho até ao depósito (sem robô).
+  const distOperadorSemRobo = distAcesso.get(CHAVE(dep.x, dep.y));
 
   return {
     prateleira: { x: alvoX, y: alvoY },
     deposito: dep,
     pontoEncontro,
-    rotaOperador,           // recolha -> ponto de encontro (com carga)
-    rotaRobo,               // depósito -> ponto de encontro
+    rotaOperador,
+    rotaRobo,
+    distOperadorAteEncontro,
+    distRoboAteEncontro: (distRoboAteEncontro != null) ? distRoboAteEncontro : null,
+    distOperadorSemRobo: (distOperadorSemRobo != null) ? distOperadorSemRobo : null,
+  };
+}
+
+// ----------------------------------------------------------------------------
+// planearRecolha: mantido para compatibilidade com o backoffice web e a app
+// (endpoint de plano único). Envolve calcularDistanciasTarefa e traduz o
+// resultado no formato de métricas (passos, poupança) já usado nas interfaces.
+// ----------------------------------------------------------------------------
+function planearRecolha({ prateleiras, maxX, maxY, alvoX, alvoY, deposito }) {
+  const r = calcularDistanciasTarefa({ prateleiras, maxX, maxY, alvoX, alvoY, deposito });
+  if (r.erro) return r;
+
+  const poupanca = (r.distOperadorSemRobo != null) ? r.distOperadorSemRobo - r.distOperadorAteEncontro : null;
+  const poupancaPct = (r.distOperadorSemRobo && r.distOperadorSemRobo > 0) ? Math.round((poupanca / r.distOperadorSemRobo) * 100) : null;
+
+  return {
+    prateleira: r.prateleira,
+    deposito: r.deposito,
+    pontoEncontro: r.pontoEncontro,
+    rotaOperador: r.rotaOperador,
+    rotaRobo: r.rotaRobo,
     metricas: {
-      operadorComCarga: distOperadorComCarga,   // passos do operador com carga
-      roboAteEncontro: (distRobo != null) ? distRobo : null,
-      operadorSemRobo: (distSemRobo != null) ? distSemRobo : null, // se levasse ao depósito
-      poupancaOperador: poupanca,               // passos poupados ao operador
-      poupancaPercent: poupancaPct              // % de esforço poupado
+      operadorComCarga: r.distOperadorAteEncontro,
+      roboAteEncontro: r.distRoboAteEncontro,
+      operadorSemRobo: r.distOperadorSemRobo,
+      poupancaOperador: poupanca,
+      poupancaPercent: poupancaPct
     }
   };
 }
 
-module.exports = { planearRecolha, bfs, ehCorredorPrincipal, escolherDeposito, reconstruirCaminho };
+module.exports = { planearRecolha, calcularDistanciasTarefa, bfs, ehCorredorPrincipal, escolherDeposito, reconstruirCaminho, acessos };

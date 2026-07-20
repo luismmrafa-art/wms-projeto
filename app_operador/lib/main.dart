@@ -232,6 +232,7 @@ class _EcraRegistoOperadorState extends State<EcraRegistoOperador> {
   final _nomeCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _senhaCtrl = TextEditingController();
+  final _codigoConviteCtrl = TextEditingController();
 
   List _armazens = [];
   int? _armazemSelecionado;
@@ -264,8 +265,8 @@ class _EcraRegistoOperadorState extends State<EcraRegistoOperador> {
   }
 
   Future<void> fazerRegisto() async {
-    if (_nomeCtrl.text.isEmpty || _emailCtrl.text.isEmpty || _senhaCtrl.text.isEmpty || _armazemSelecionado == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preenche tudo e escolhe um armazém.'), backgroundColor: Colors.orange));
+    if (_nomeCtrl.text.isEmpty || _emailCtrl.text.isEmpty || _senhaCtrl.text.isEmpty || _armazemSelecionado == null || _codigoConviteCtrl.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preenche tudo, escolhe um armazém e indica o código de convite (pede-o ao gestor).'), backgroundColor: Colors.orange));
       return;
     }
 
@@ -280,6 +281,7 @@ class _EcraRegistoOperadorState extends State<EcraRegistoOperador> {
           'email': _emailCtrl.text,
           'senha': _senhaCtrl.text,
           'armazemID': _armazemSelecionado,
+          'codigoConvite': _codigoConviteCtrl.text,
         }),
       );
 
@@ -351,6 +353,12 @@ class _EcraRegistoOperadorState extends State<EcraRegistoOperador> {
                           );
                         }).toList(),
                         onChanged: (v) => setState(() => _armazemSelecionado = v),
+                      ),
+                      const SizedBox(height: 15),
+                      TextField(
+                        controller: _codigoConviteCtrl,
+                        textCapitalization: TextCapitalization.characters,
+                        decoration: const InputDecoration(labelText: 'Código de convite (do gestor)', prefixIcon: Icon(Icons.key_outlined)),
                       ),
                       const SizedBox(height: 25),
                       SizedBox(
@@ -435,6 +443,18 @@ class _EcraTarefasState extends State<EcraTarefas> {
     Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const EcraLogin()));
   }
 
+  double _pesoDaTarefa(dynamic t) {
+    final v = t['PesoKg'];
+    if (v == null) return 1.0;
+    return v is num ? v.toDouble() : double.tryParse(v.toString()) ?? 1.0;
+  }
+
+  bool _fragilDaTarefa(dynamic t) {
+    final v = t['Fragil'];
+    if (v == null) return false;
+    return v == true || v == 1 || v.toString() == '1';
+  }
+
   Future<void> confirmarTarefa(int idTarefa) async {
     try {
       final resposta = await http.post(
@@ -475,29 +495,57 @@ class _EcraTarefasState extends State<EcraTarefas> {
       final p = jsonDecode(resposta.body);
       final enc = p['pontoEncontro'];
       final m = p['metricas'];
+      final decisao = p['decisao'];
+      final robo = p['robo'];
+      final artigo = p['artigo'];
+      final humanoSozinho = decisao != null && decisao['atribuicao'] == 'humano_sozinho';
       if (!mounted) return;
       showDialog(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('🤝 Coordenação com o robô'),
+          title: Text(humanoSozinho ? '🚶 Recolha sem robô' : '🤝 Coordenação com o robô'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Recolhe o "$produto" na prateleira e leva-o ao ponto de encontro:', style: const TextStyle(fontSize: 15)),
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: const Color(0xFFE9C46A).withValues(alpha: 0.25), borderRadius: BorderRadius.circular(10)),
-                child: Text('📍 Ponto de encontro:  X ${enc['x']}   ·   Y ${enc['y']}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: azulEscuro)),
-              ),
-              const SizedBox(height: 12),
-              Text('🚶 Transportas a carga apenas ${m['operadorComCarga']} passos.', style: const TextStyle(fontSize: 14)),
-              Text('🚚 O robô percorre ${m['roboAteEncontro']} passos até ti.', style: const TextStyle(fontSize: 14)),
-              const SizedBox(height: 6),
-              Text('✅ Poupas ${m['poupancaOperador']} passos (${m['poupancaPercent']}%) de esforço com carga.',
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: verde)),
+              if (decisao != null)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: (humanoSozinho ? vermelho : verde).withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    humanoSozinho
+                        ? '🚶 Decisão: leva sozinho até à expedição (${decisao['motivo']})'
+                        : '🤝 Decisão: entrega ao robô${robo != null ? ' — ${robo['Nome']}' : ''} (${decisao['motivo']})',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: humanoSozinho ? vermelho : verde),
+                  ),
+                ),
+              if (artigo != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text('📦 ${artigo['PesoKg']} kg${(artigo['Fragil'] == 1 || artigo['Fragil'] == true) ? ' · ⚠️ frágil' : ''}', style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                ),
+              if (!humanoSozinho) ...[
+                Text('Recolhe o "$produto" na prateleira e leva-o ao ponto de encontro:', style: const TextStyle(fontSize: 15)),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: const Color(0xFFE9C46A).withValues(alpha: 0.25), borderRadius: BorderRadius.circular(10)),
+                  child: Text('📍 Ponto de encontro:  X ${enc['x']}   ·   Y ${enc['y']}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: azulEscuro)),
+                ),
+                const SizedBox(height: 12),
+                Text('🚶 Transportas a carga apenas ${m['operadorComCarga']} passos.', style: const TextStyle(fontSize: 14)),
+                Text('🚚 O robô percorre ${m['roboAteEncontro']} passos até ti.', style: const TextStyle(fontSize: 14)),
+                const SizedBox(height: 6),
+                Text('✅ Poupas ${m['poupancaOperador']} passos (${m['poupancaPercent']}%) de esforço com carga.',
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: verde)),
+              ] else
+                Text('Este artigo segue diretamente contigo até à expedição (X ${p['deposito']['x']} · Y ${p['deposito']['y']}), sem passar pelo robô.', style: const TextStyle(fontSize: 14)),
             ],
           ),
           actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
@@ -572,7 +620,27 @@ class _EcraTarefasState extends State<EcraTarefas> {
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 14),
+                            const SizedBox(height: 8),
+                            // 📦 Características do artigo (peso/frágil) — usadas na decisão humano/robô
+                            Wrap(
+                              spacing: 8,
+                              children: [
+                                Chip(
+                                  label: Text('${_pesoDaTarefa(t).toStringAsFixed(1)} kg', style: const TextStyle(fontSize: 12)),
+                                  visualDensity: VisualDensity.compact,
+                                  backgroundColor: fundo,
+                                  side: BorderSide.none,
+                                ),
+                                if (_fragilDaTarefa(t))
+                                  const Chip(
+                                    label: Text('⚠️ Frágil', style: TextStyle(fontSize: 12, color: vermelho)),
+                                    visualDensity: VisualDensity.compact,
+                                    backgroundColor: Color(0xFFFCE8E8),
+                                    side: BorderSide.none,
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
                             Container(
                               width: double.infinity,
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

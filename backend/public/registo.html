@@ -71,8 +71,9 @@
                 const data = await res.json();
 
                 if (res.ok) {
-                    // Se o registo correr bem, avisa o utilizador e reencaminha-o para o Login
-                    alert("✅ " + data.mensagem);
+                    // Se o registo correr bem, mostra o código de convite (os operadores
+                    // precisam dele para se registarem neste armazém) e só depois avança para o Login
+                    alert("✅ " + data.mensagem + "\n\n🔑 Código de convite para os teus operadores: " + data.codigoConvite + "\n\nGuarda este código — vais precisar dele para os operadores se registarem na app.");
                     window.location.href = 'login.html'; // Manda o cliente para o Login!
                 } else {
                     // Se o servidor der erro (ex: email já existe), mostra o erro
