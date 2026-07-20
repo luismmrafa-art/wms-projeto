@@ -489,7 +489,17 @@ class _EcraTarefasState extends State<EcraTarefas> {
       );
       if (resposta.statusCode != 200) {
         final erro = jsonDecode(resposta.body);
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ ${erro['erro']}'), backgroundColor: Colors.red));
+        // Isto só impede calcular um ponto de encontro com o robô para esta
+        // prateleira (ex.: prateleira sem nenhuma célula livre à volta, cercada
+        // por outras). Não impede a recolha em si — o operador continua a
+        // poder confirmá-la normalmente, sem o apoio do robô.
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('🤝 Sem coordenação com o robô: ${erro['erro']} Podes continuar e confirmar a recolha na mesma.'),
+            backgroundColor: Colors.orange[800],
+            duration: const Duration(seconds: 5),
+          ));
+        }
         return;
       }
       final p = jsonDecode(resposta.body);

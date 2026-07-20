@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken'); // Para criar/verificar os tokens de login
 const pool = require('./db'); // Agora chama o pool do MySQL
 const { planearRecolha, calcularDistanciasTarefa } = require('./coordenacao'); // BFS: distâncias e rotas
-const { obterOuCriarArtigo, resolverArtigoID } = require('./artigos'); // Dados mestre do artigo (peso, dimensões, frágil)
+const { obterOuCriarArtigo, resolverArtigoID, caberNaPrateleira } = require('./artigos'); // Dados mestre do artigo (peso, dimensões, frágil)
 const { listarTiposRobo, recomendarRobo, VELOCIDADE_HUMANO_MS } = require('./robos'); // Catálogo e recomendação de robôs (SAD)
 const { avaliarTarefa } = require('./custoDecisao'); // Decisão multicritério humano/robô
 const { compararAlgoritmos } = require('./algoritmos'); // Os 3 algoritmos: exato, guloso, meta-heurística
@@ -150,17 +150,41 @@ app.post('/api/produtos/novo', verificarToken, async (req, res) => {
             return res.status(400).json({ erro: `Essa prateleira só tem ${prateleira.Niveis} andares!` });
         }
 
-        // 3. Regista/atualiza o artigo (peso, dimensões, frágil) — dados mestre do SKU
+        // 3. Valida que o artigo cabe fisicamente na prateleira deste armazém.
+        // Todas as prateleiras de um armazém têm o mesmo tamanho (Armazens.Prateleira*),
+        // pelo que a comparação é sempre contra esse tamanho único, não por prateleira.
+        const dimsArtigo = {
+            comprimentoCm: comprimentoCm !== undefined ? parseFloat(comprimentoCm) : 20,
+            larguraCm: larguraCm !== undefined ? parseFloat(larguraCm) : 20,
+            alturaCm: alturaCm !== undefined ? parseFloat(alturaCm) : 20,
+        };
+        const [armazemRows] = await pool.query(
+            'SELECT PrateleiraLarguraCm, PrateleiraProfundidadeCm, PrateleiraAlturaNivelCm FROM Armazens WHERE ID = ?',
+            [armazemID]
+        );
+        const dimsPrateleira = {
+            larguraCm: Number(armazemRows[0]?.PrateleiraLarguraCm ?? 100),
+            profundidadeCm: Number(armazemRows[0]?.PrateleiraProfundidadeCm ?? 60),
+            alturaNivelCm: Number(armazemRows[0]?.PrateleiraAlturaNivelCm ?? 40),
+        };
+        if (!caberNaPrateleira(dimsArtigo, dimsPrateleira)) {
+            return res.status(400).json({
+                erro: `Este artigo (${dimsArtigo.comprimentoCm}×${dimsArtigo.larguraCm}×${dimsArtigo.alturaCm} cm) não cabe nas prateleiras deste armazém ` +
+                      `(máximo ${dimsPrateleira.larguraCm}×${dimsPrateleira.profundidadeCm} cm de base, ${dimsPrateleira.alturaNivelCm} cm de altura por nível).`
+            });
+        }
+
+        // 4. Regista/atualiza o artigo (peso, dimensões, frágil) — dados mestre do SKU
         const artigo = await obterOuCriarArtigo(pool, {
             armazemID, nome,
             pesoKg: pesoKg !== undefined ? parseFloat(pesoKg) : undefined,
-            comprimentoCm: comprimentoCm !== undefined ? parseFloat(comprimentoCm) : undefined,
-            larguraCm: larguraCm !== undefined ? parseFloat(larguraCm) : undefined,
-            alturaCm: alturaCm !== undefined ? parseFloat(alturaCm) : undefined,
+            comprimentoCm: dimsArtigo.comprimentoCm,
+            larguraCm: dimsArtigo.larguraCm,
+            alturaCm: dimsArtigo.alturaCm,
             fragil: fragil !== undefined ? !!fragil && fragil !== 'false' && fragil !== '0' : undefined,
         });
 
-        // 4. Insere uma linha por cada unidade (INSERT múltiplo), ligada ao artigo por FK
+        // 5. Insere uma linha por cada unidade (INSERT múltiplo), ligada ao artigo por FK
         const valores = Array.from({ length: quantidade }, () => [nome, prateleira.ID, nivel, armazemID, artigo.ID]);
         await pool.query(
             'INSERT INTO Produtos (Nome, PrateleiraID, Nivel, ArmazemID, ArtigoID) VALUES ?',
@@ -671,6 +695,57 @@ app.get('/api/artigos/procurar', verificarToken, async (req, res) => {
         res.json(rows[0] || null);
     } catch (erro) {
         res.status(500).json({ erro: 'Erro ao procurar o artigo.' });
+    }
+});
+
+// ⚙️ CONFIGURAÇÃO DO ARMAZÉM: largura do corredor (usada na recomendação de
+// robô) e, opcionalmente, o robô fixado manualmente pelo gestor.
+app.get('/api/armazem/config', verificarToken, async (req, res) => {
+    try {
+        const [rows] = await pool.query(
+            'SELECT LarguraCorredorM, RoboTipoID, PrateleiraLarguraCm, PrateleiraProfundidadeCm, PrateleiraAlturaNivelCm FROM Armazens WHERE ID = ?',
+            [req.utilizador.armazemID]
+        );
+        res.json(rows[0] || { LarguraCorredorM: 1.2, RoboTipoID: null, PrateleiraLarguraCm: 100, PrateleiraProfundidadeCm: 60, PrateleiraAlturaNivelCm: 40 });
+    } catch (erro) {
+        res.status(500).json({ erro: 'Erro ao carregar a configuração do armazém.' });
+    }
+});
+
+app.post('/api/armazem/config', verificarToken, async (req, res) => {
+    try {
+        const armazemID = req.utilizador.armazemID;
+        const { larguraCorredorM, roboTipoID, prateleiraLarguraCm, prateleiraProfundidadeCm, prateleiraAlturaNivelCm } = req.body;
+
+        const largura = parseFloat(larguraCorredorM);
+        if (!Number.isFinite(largura) || largura <= 0) {
+            return res.status(400).json({ erro: 'A largura do corredor tem de ser um número positivo.' });
+        }
+
+        const prLargura = parseFloat(prateleiraLarguraCm);
+        const prProfundidade = parseFloat(prateleiraProfundidadeCm);
+        const prAltura = parseFloat(prateleiraAlturaNivelCm);
+        if (![prLargura, prProfundidade, prAltura].every(v => Number.isFinite(v) && v > 0)) {
+            return res.status(400).json({ erro: 'As dimensões da prateleira têm de ser números positivos.' });
+        }
+
+        // roboTipoID vazio/nulo = deixar a recomendação automática decidir
+        const roboID = (roboTipoID === '' || roboTipoID === null || roboTipoID === undefined) ? null : parseInt(roboTipoID);
+        if (roboID !== null) {
+            const [tipo] = await pool.query('SELECT ID FROM TiposRobo WHERE ID = ?', [roboID]);
+            if (tipo.length === 0) return res.status(404).json({ erro: 'Esse tipo de robô não existe.' });
+        }
+
+        await pool.query(
+            `UPDATE Armazens SET LarguraCorredorM = ?, RoboTipoID = ?,
+               PrateleiraLarguraCm = ?, PrateleiraProfundidadeCm = ?, PrateleiraAlturaNivelCm = ?
+             WHERE ID = ?`,
+            [largura, roboID, prLargura, prProfundidade, prAltura, armazemID]
+        );
+        res.json({ mensagem: 'Configuração do armazém guardada!' });
+    } catch (erro) {
+        console.error('Erro a guardar configuração do armazém:', erro);
+        res.status(500).json({ erro: 'Erro ao guardar a configuração do armazém.' });
     }
 });
 

@@ -11,6 +11,9 @@
 //   - Produtos.ArtigoID / Encomendas.ArtigoID: FK reais, substituem a ligação
 //     frágil por nome (ProdutoNome / Produtos.Nome)
 //   - Armazens.LarguraCorredorM / RoboTipoID: layout físico + robô escolhido
+//   - TiposRobo.Comprimento/Largura/AlturaCm: medidas físicas reais do robô
+//   - Armazens.Prateleira{Largura,Profundidade,AlturaNivel}Cm: tamanho único
+//     das prateleiras do armazém, usado para validar se um artigo cabe
 // ============================================================================
 
 const mysql = require('mysql2/promise');
@@ -221,6 +224,58 @@ async function migrar() {
     if (await fkExiste(conn, 'encomendas', 'fk_encomenda_artigo')) return false;
     await conn.query(`ALTER TABLE encomendas MODIFY COLUMN ArtigoID INT NOT NULL`);
     await conn.query(`ALTER TABLE encomendas ADD CONSTRAINT fk_encomenda_artigo FOREIGN KEY (ArtigoID) REFERENCES Artigos(ID)`);
+    return true;
+  });
+
+  // 6. Dimensões físicas dos robôs (comprimento/largura/altura) — até aqui só
+  // existia a largura mínima de corredor exigida; agora ficam também as
+  // medidas reais do robô, para se perceber o porquê desse mínimo e para
+  // futuras verificações de encaixe (ex.: robô vs. largura da prateleira).
+  await passo('Colunas TiposRobo.ComprimentoCm / LarguraCm / AlturaCm', async () => {
+    if (await colunaExiste(conn, 'TiposRobo', 'ComprimentoCm')) return false;
+    await conn.query(`ALTER TABLE TiposRobo
+      ADD COLUMN ComprimentoCm DECIMAL(6,1) NULL,
+      ADD COLUMN LarguraCm DECIMAL(6,1) NULL,
+      ADD COLUMN AlturaCm DECIMAL(6,1) NULL`);
+    return true;
+  });
+  await passo('Backfill das medidas dos 4 robôs de referência', async () => {
+    const medidas = {
+      'AGV Trilho Fixo': [80, 60, 120],
+      'AMR Ligeiro': [50, 40, 100],
+      'AMR Pesado': [100, 80, 150],
+      'Cobot Colaborativo': [45, 45, 110],
+    };
+    let alterados = 0;
+    for (const [nome, [c, l, a]] of Object.entries(medidas)) {
+      const [res] = await conn.query(
+        'UPDATE TiposRobo SET ComprimentoCm = ?, LarguraCm = ?, AlturaCm = ? WHERE Nome = ? AND ComprimentoCm IS NULL',
+        [c, l, a, nome]
+      );
+      alterados += res.affectedRows;
+    }
+    // Robôs sem medidas conhecidas (adicionados manualmente): valor por omissão
+    // conservador, para nunca ficarem NULL e partirem a validação de encaixe.
+    const [res2] = await conn.query('UPDATE TiposRobo SET ComprimentoCm = 60, LarguraCm = 50, AlturaCm = 120 WHERE ComprimentoCm IS NULL');
+    alterados += res2.affectedRows;
+    if (alterados > 0) {
+      await conn.query(`ALTER TABLE TiposRobo
+        MODIFY COLUMN ComprimentoCm DECIMAL(6,1) NOT NULL,
+        MODIFY COLUMN LarguraCm DECIMAL(6,1) NOT NULL,
+        MODIFY COLUMN AlturaCm DECIMAL(6,1) NOT NULL`);
+    }
+    return alterados > 0;
+  });
+
+  // 7. Tamanho único das prateleiras por armazém — simplifica o layout (todas
+  // as prateleiras de um armazém têm o mesmo footprint) e permite validar, na
+  // entrada de stock, que um artigo cabe fisicamente (secção seguinte).
+  await passo('Colunas armazens.Prateleira{Largura,Profundidade,AlturaNivel}Cm', async () => {
+    if (await colunaExiste(conn, 'armazens', 'PrateleiraLarguraCm')) return false;
+    await conn.query(`ALTER TABLE armazens
+      ADD COLUMN PrateleiraLarguraCm DECIMAL(6,1) NOT NULL DEFAULT 100.0,
+      ADD COLUMN PrateleiraProfundidadeCm DECIMAL(6,1) NOT NULL DEFAULT 60.0,
+      ADD COLUMN PrateleiraAlturaNivelCm DECIMAL(6,1) NOT NULL DEFAULT 40.0`);
     return true;
   });
 

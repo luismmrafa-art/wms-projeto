@@ -118,16 +118,40 @@
                     <div class="campo" style="flex:1"><label>Peso (kg):</label><input type="number" id="prodPeso" value="1" min="0" step="0.1"></div>
                     <div class="campo" style="flex:1"><label>Comp. (cm):</label><input type="number" id="prodComprimento" value="20" min="0"></div>
                 </div>
-                <div style="display:flex; gap:5px; align-items:center;">
-                    <div class="campo" style="flex:1; margin-bottom:0;"><label>Larg. (cm):</label><input type="number" id="prodLargura" value="20" min="0"></div>
-                    <div class="campo" style="flex:1; margin-bottom:0; display:flex; align-items:center; gap:6px;"><input type="checkbox" id="prodFragil" style="width:auto; margin:0;"><label style="margin:0; white-space:nowrap;">Frágil</label></div>
+                <div style="display:flex; gap:5px">
+                    <div class="campo" style="flex:1"><label>Larg. (cm):</label><input type="number" id="prodLargura" value="20" min="0"></div>
+                    <div class="campo" style="flex:1"><label>Alt. (cm):</label><input type="number" id="prodAltura" value="20" min="0"></div>
                 </div>
+                <div class="campo" style="display:flex; align-items:center; gap:6px; margin-bottom:12px;">
+                    <input type="checkbox" id="prodFragil" style="width:auto; margin:0;"><label style="margin:0;">Frágil</label>
+                </div>
+                <div id="prodDimsAviso" style="font-size:12px; color:#666; margin-bottom:10px;"></div>
                 <button class="btn-produto" onclick="guardarProduto()">ARRUMAR NO STOCK</button>
             </div>
             <div class="card">
                 <h3>🚚 Robô Recomendado (SAD)</h3>
                 <div id="roboRecomendado" style="font-size:13px; color:#555; margin-bottom:10px;">A carregar…</div>
                 <button onclick="carregarRecomendacaoRobo()" style="background:#457b9d;">ATUALIZAR RECOMENDAÇÃO</button>
+            </div>
+            <div class="card">
+                <h3>⚙️ Configuração do Armazém</h3>
+                <div class="campo">
+                    <label>Largura do corredor (m):</label>
+                    <input type="number" id="configLarguraCorredor" value="1.2" min="0.1" step="0.1">
+                </div>
+                <div class="campo">
+                    <label>Robô fixo (opcional):</label>
+                    <select id="configRoboTipo" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--borda);">
+                        <option value="">Automático (recomendado)</option>
+                    </select>
+                </div>
+                <div style="font-size:12px; color:#888; margin:-6px 0 10px;">Tamanho das prateleiras — igual em todo o armazém:</div>
+                <div style="display:flex; gap:5px">
+                    <div class="campo" style="flex:1"><label>Larg. (cm):</label><input type="number" id="configPrateleiraLargura" value="100" min="1"></div>
+                    <div class="campo" style="flex:1"><label>Prof. (cm):</label><input type="number" id="configPrateleiraProfundidade" value="60" min="1"></div>
+                </div>
+                <div class="campo"><label>Altura por nível (cm):</label><input type="number" id="configPrateleiraAlturaNivel" value="40" min="1"></div>
+                <button onclick="guardarConfigArmazem()" style="background:#1d3557;">GUARDAR CONFIGURAÇÃO</button>
             </div>
             <div class="card">
                 <h3>🛒 Simulador ERP (Múltiplos Itens)</h3>
@@ -437,12 +461,14 @@
                     document.getElementById('prodPeso').value = artigo.PesoKg;
                     document.getElementById('prodComprimento').value = artigo.ComprimentoCm;
                     document.getElementById('prodLargura').value = artigo.LarguraCm;
+                    document.getElementById('prodAltura').value = artigo.AlturaCm;
                     document.getElementById('prodFragil').checked = !!artigo.Fragil;
                 } else {
                     // Artigo novo: repõe os valores por omissão para não herdar os do artigo anterior
                     document.getElementById('prodPeso').value = '1';
                     document.getElementById('prodComprimento').value = '20';
                     document.getElementById('prodLargura').value = '20';
+                    document.getElementById('prodAltura').value = '20';
                     document.getElementById('prodFragil').checked = false;
                 }
             } catch (e) { /* silencioso: não bloqueia a entrada de stock */ }
@@ -458,7 +484,9 @@
             const pesoKg = parseFloat(document.getElementById('prodPeso').value) || 1;
             const comprimentoCm = parseFloat(document.getElementById('prodComprimento').value) || 20;
             const larguraCm = parseFloat(document.getElementById('prodLargura').value) || 20;
+            const alturaCm = parseFloat(document.getElementById('prodAltura').value) || 20;
             const fragil = document.getElementById('prodFragil').checked;
+            document.getElementById('prodDimsAviso').innerText = '';
 
             // 🔑 1. O código vai buscar a chave ao bolso do browser
             const armazemID = sessionStorage.getItem('armazemID');
@@ -472,7 +500,7 @@
                 // 🔑 2. A chave é enviada dentro deste pacote para o servidor! Inclui as
                 // características físicas do artigo (peso/dimensões/frágil) usadas pela
                 // decisão multicritério humano/robô.
-                body: JSON.stringify({ nome, posX, posY, nivel, quantidade, armazemID, pesoKg, comprimentoCm, larguraCm, fragil })
+                body: JSON.stringify({ nome, posX, posY, nivel, quantidade, armazemID, pesoKg, comprimentoCm, larguraCm, alturaCm, fragil })
             });
 
             if(res.ok) {
@@ -484,6 +512,8 @@
                 carregarRecomendacaoRobo();
             } else {
                 const erro = await res.json();
+                // Erro de encaixe (não cabe na prateleira): mostra por baixo do formulário, não só num alert.
+                document.getElementById('prodDimsAviso').innerHTML = `<span style="color:#e63946;">⚠️ ${erro.erro || 'Falha ao guardar.'}</span>`;
                 alert("❌ Erro: " + (erro.erro || "Falha ao guardar."));
             }
         }
@@ -502,10 +532,59 @@
                 div.innerHTML = `
                     <div style="font-weight:700; color:#1d3557;">${rec.Nome}</div>
                     <div> ${rec.CapacidadeCargaKg} kg &nbsp;·&nbsp;  ${rec.VelocidadeMS} m/s &nbsp;·&nbsp;  ${rec.TipoNavegacao}</div>
+                    <div style="font-size:12px; color:#888;">Medidas do robô: ${rec.ComprimentoCm}×${rec.LarguraCm}×${rec.AlturaCm} cm (C×L×A)</div>
                     <div style="margin-top:4px; font-size:12px; color:#666;">${rec.motivo}</div>
                 `;
             } catch (e) {
                 div.innerHTML = '<span style="color:#e63946;">Erro ao calcular a recomendação.</span>';
+            }
+        }
+
+        // --- CONFIGURAÇÃO DO ARMAZÉM (largura do corredor + robô fixo opcional) ---
+        // Carrega a configuração atual e a lista de robôs, preenchendo o formulário.
+        async function carregarConfigArmazem() {
+            try {
+                const [configRes, tiposRes] = await Promise.all([
+                    fetch('/api/armazem/config'),
+                    fetch('/api/robos/tipos'),
+                ]);
+                const config = await configRes.json();
+                const tipos = await tiposRes.json();
+
+                document.getElementById('configLarguraCorredor').value = config.LarguraCorredorM ?? 1.2;
+                document.getElementById('configPrateleiraLargura').value = config.PrateleiraLarguraCm ?? 100;
+                document.getElementById('configPrateleiraProfundidade').value = config.PrateleiraProfundidadeCm ?? 60;
+                document.getElementById('configPrateleiraAlturaNivel').value = config.PrateleiraAlturaNivelCm ?? 40;
+
+                const select = document.getElementById('configRoboTipo');
+                select.innerHTML = '<option value="">Automático (recomendado)</option>' +
+                    tipos.map(t => `<option value="${t.ID}">${t.Nome} (${t.CapacidadeCargaKg} kg · ${t.VelocidadeMS} m/s · ${t.ComprimentoCm}×${t.LarguraCm}×${t.AlturaCm} cm)</option>`).join('');
+                select.value = config.RoboTipoID ?? '';
+            } catch (e) { /* mantém os valores por omissão do HTML */ }
+        }
+
+        // Guarda a largura do corredor e o robô fixado (ou "automático") para este armazém.
+        // Isto é o que a recomendação de robô (SAD) usa: sem esta configuração, todos os
+        // armazéns ficariam presos ao valor por omissão (1,2 m) e nunca variavam por layout.
+        async function guardarConfigArmazem() {
+            const larguraCorredorM = document.getElementById('configLarguraCorredor').value;
+            const roboTipoID = document.getElementById('configRoboTipo').value;
+            const prateleiraLarguraCm = document.getElementById('configPrateleiraLargura').value;
+            const prateleiraProfundidadeCm = document.getElementById('configPrateleiraProfundidade').value;
+            const prateleiraAlturaNivelCm = document.getElementById('configPrateleiraAlturaNivel').value;
+
+            const res = await fetch('/api/armazem/config', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ larguraCorredorM, roboTipoID, prateleiraLarguraCm, prateleiraProfundidadeCm, prateleiraAlturaNivelCm })
+            });
+
+            if (res.ok) {
+                alert('✅ Configuração do armazém guardada!');
+                carregarRecomendacaoRobo();
+            } else {
+                const erro = await res.json();
+                alert('❌ Erro: ' + (erro.erro || 'Falha ao guardar.'));
             }
         }
 
@@ -822,6 +901,7 @@
         carregarMapa();       // Desenha o Armazém e as prateleiras
         carregarVendas();     // 🌟 Carrega a tabela de vendas 🌟
         carregarRecomendacaoRobo(); //  Recomendação de robô para este armazém (SAD)
+        carregarConfigArmazem();    // Largura do corredor + robô fixo (o que a recomendação usa)
         carregarCodigoConvite();
         setInterval(carregarVendas, 5000); // 🌟 Atualiza as vendas a cada 5 segundos para o Gestor ter feedback live 🌟
     </script>

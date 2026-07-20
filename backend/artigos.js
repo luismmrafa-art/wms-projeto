@@ -45,4 +45,15 @@ async function resolverArtigoID(pool, armazemID, nome) {
   return artigo.ID;
 }
 
-module.exports = { obterOuCriarArtigo, resolverArtigoID };
+// Verifica se um artigo cabe fisicamente numa prateleira (com rotação no
+// plano horizontal — comprimento/largura podem trocar — mas não na vertical,
+// já que a altura é limitada pela gravidade e pelo nível de cima).
+function caberNaPrateleira({ comprimentoCm, larguraCm, alturaCm }, { larguraCm: prLargura, profundidadeCm: prProfundidade, alturaNivelCm: prAltura }) {
+  const encaixaHorizontal =
+    (comprimentoCm <= prLargura && larguraCm <= prProfundidade) ||
+    (comprimentoCm <= prProfundidade && larguraCm <= prLargura);
+  const encaixaAltura = alturaCm <= prAltura;
+  return encaixaHorizontal && encaixaAltura;
+}
+
+module.exports = { obterOuCriarArtigo, resolverArtigoID, caberNaPrateleira };
