@@ -225,41 +225,60 @@
       <li>
         <span class="tag">Backend · Node.js + Express</span>
         <h3>O núcleo do sistema</h3>
-        <p>Expõe a API REST, comunica com a base de dados e concentra a lógica de coordenação.</p>
+        <p>Expõe a API REST e concentra, em módulos isolados e testáveis, o cálculo de distâncias (BFS), o catálogo e a recomendação de robôs, a decisão multicritério e os três algoritmos de planeamento.</p>
       </li>
       <li>
         <span class="tag">Base de dados · MySQL</span>
         <h3>Planta, stock e encomendas</h3>
-        <p>Guarda o layout do armazém, os produtos por prateleira e as ordens de picking. As operações com várias alterações correm dentro de transações.</p>
+        <p>Guarda o layout do armazém, o catálogo de robôs, os artigos (peso, dimensões, fragilidade) e as ordens de picking, ligados por chaves estrangeiras reais. As operações com várias alterações correm dentro de transações.</p>
       </li>
       <li>
         <span class="tag">Backoffice · HTML, CSS, JavaScript</span>
         <h3>Mapa interativo do armazém</h3>
-        <p>O gestor constrói prateleiras, importa layouts em JSON, dá entrada de stock e vê a coordenação desenhada sobre o mapa.</p>
+        <p>O gestor constrói prateleiras, importa layouts em JSON, dá entrada de stock (com validação de encaixe) e configura o corredor, as prateleiras e o robô do armazém.</p>
       </li>
       <li>
         <span class="tag">Aplicação móvel · Flutter</span>
         <h3>O lado do operador</h3>
-        <p>Mostra as tarefas pendentes, o ponto de encontro com o robô e a poupança de esforço. A recolha é confirmada no telemóvel.</p>
+        <p>Mostra as tarefas pendentes com peso e fragilidade, a decisão humano/robô e o ponto de encontro. A recolha é confirmada no telemóvel.</p>
       </li>
     </ul>
+  </div>
+</section>
+
+<section id="robos">
+  <div class="wrap">
+    <p class="eyebrow">Catálogo de robôs</p>
+    <h2>Um sistema de apoio à decisão, não um robô fixo</h2>
+    <p>Cada armazém tem um layout diferente — corredores mais ou menos largos, artigos mais leves ou mais pesados. Em vez de assumir sempre o mesmo modelo, o sistema mantém um catálogo de tipos de robô e recomenda automaticamente o mais adequado a cada armazém, filtrando os que cabem fisicamente no corredor e pontuando-os pelo equilíbrio entre capacidade e velocidade. O gestor pode ainda fixar manualmente um robô, sobrepondo-se à recomendação.</p>
+    <table>
+      <thead>
+        <tr><th>Robô</th><th>Navegação</th><th>Capacidade</th><th>Corredor mínimo</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>AGV Trilho Fixo</td><td>Trilho fixo</td><td>40 kg</td><td>1,00 m</td></tr>
+        <tr><td>AMR Ligeiro</td><td>Perímetro</td><td>15 kg</td><td>0,80 m</td></tr>
+        <tr><td>AMR Pesado</td><td>Perímetro</td><td>80 kg</td><td>1,20 m</td></tr>
+        <tr><td>Cobot Colaborativo</td><td>Livre</td><td>25 kg</td><td>0,60 m</td></tr>
+      </tbody>
+    </table>
   </div>
 </section>
 
 <section id="algoritmo">
   <div class="wrap cols">
     <div>
-      <p class="eyebrow">Coordenação</p>
-      <h2>Como se escolhe o ponto de encontro</h2>
-      <p>O armazém é representado como uma grelha 2D em que as prateleiras são obstáculos. Como não é possível atravessar as prateleiras, a distância em linha reta não serve: é preciso procurar caminho.</p>
-      <p>O sistema executa duas procuras em largura (BFS) — uma a partir da prateleira, outra a partir do depósito — e varre as células do corredor principal, escolhendo aquela que fica mais perto do operador. A grelha tem custo uniforme, pelo que a BFS devolve o caminho mais curto sem necessitar de heurística.</p>
-      <p>O custo é linear no número de células, O(L×C).</p>
+      <p class="eyebrow">Decisão e planeamento</p>
+      <h2>Nem tudo é distância</h2>
+      <p>O armazém é representado como uma grelha 2D em que as prateleiras são obstáculos. Uma procura em largura (BFS) calcula distâncias e rotas entre pontos — é a peça geométrica de base, não a decisão em si.</p>
+      <p>A decisão de usar o robô é <strong>multicritério</strong>: pondera o tempo de cada agente, a velocidades diferentes, o peso e a fragilidade do artigo face à capacidade do robô. Um artigo demasiado pesado vai para o operador sozinho — não por ser mais rápido, mas porque a opção do robô é fisicamente inviável.</p>
+      <p>Para atribuir e ordenar um conjunto de recolhas pendentes, comparam-se <strong>três algoritmos</strong>: um exato (força bruta, só viável para poucas recolhas), uma heurística gulosa e uma meta-heurística de recozimento simulado.</p>
     </div>
     <div>
       <p class="eyebrow">Segurança</p>
       <h2>Quem vê o quê</h2>
-      <p>A autenticação usa <strong>JWT</strong>, com o identificador do armazém dentro do token. Nenhum pedido pode indicar o armazém por parâmetro — é sempre derivado do token, o que impede um utilizador de ver dados de outro armazém.</p>
-      <p>As palavras-passe são guardadas como <em>hash</em> <strong>bcrypt</strong>. As consultas à base de dados são parametrizadas.</p>
+      <p>A autenticação usa <strong>JWT</strong>, com o identificador do armazém dentro do token. Nenhum pedido pode indicar o armazém por parâmetro — é sempre derivado do token, o que impede um utilizador de ver dados de outro armazém. O registo de operador exige um código de convite gerado pelo gestor.</p>
+      <p>As palavras-passe são guardadas como <em>hash</em> <strong>bcrypt</strong>. As consultas à base de dados são parametrizadas, e produtos/encomendas ligam-se aos artigos por chave estrangeira.</p>
     </div>
   </div>
 </section>
@@ -268,17 +287,18 @@
   <div class="wrap">
     <p class="eyebrow">Validação</p>
     <h2>Resultados</h2>
-    <p>O algoritmo foi avaliado em dois layouts distintos, comparando a distância que o operador percorreria com carga sem apoio do robô com a distância até ao ponto de encontro.</p>
+    <p>Os três algoritmos de planeamento foram comparados sobre um conjunto de recolhas pendentes (armazém 7×6, 6 recolhas), registando o custo total da solução e o tempo de cálculo.</p>
     <table>
       <thead>
-        <tr><th>Layout</th><th>Dimensão</th><th>Redução da distância com carga</th></tr>
+        <tr><th>Algoritmo</th><th>Custo total</th><th>Tempo de cálculo</th><th>Desvio ao ótimo</th></tr>
       </thead>
       <tbody>
-        <tr><td>Armazém base</td><td>7 × 6</td><td>73% (média)</td></tr>
-        <tr><td>Layout alternativo</td><td>5 × 7</td><td>80% – 100%</td></tr>
+        <tr><td>Exato</td><td>25,77 s</td><td>895 ms</td><td>0%</td></tr>
+        <tr><td>Guloso</td><td>31,78 s</td><td>3 ms</td><td>23,3%</td></tr>
+        <tr><td>Meta-heurística</td><td>27,77 s</td><td>38 ms</td><td>7,8%</td></tr>
       </tbody>
     </table>
-    <p style="margin-top:20px;color:var(--slate);font-size:15px">Os testes funcionais cobrem autenticação, isolamento entre armazéns, validação de stock e o cálculo do ponto de encontro.</p>
+    <p style="margin-top:20px;color:var(--slate);font-size:15px">O padrão esperado confirma-se: o algoritmo exato garante o ótimo mas não escala; a heurística gulosa é sempre rápida mas nem sempre ótima; a meta-heurística aproxima-se do ótimo num tempo muito inferior ao do algoritmo exato. Os testes funcionais cobrem ainda autenticação, isolamento entre armazéns, validação de stock, encaixe físico do artigo na prateleira e acessibilidade do layout.</p>
   </div>
 </section>
 
