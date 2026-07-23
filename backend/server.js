@@ -22,7 +22,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// 🛡️ GUARDA: middleware que exige um token válido para aceder à rota.
+// GUARDA: middleware que exige um token válido para aceder à rota.
 // Lê o cabeçalho "Authorization: Bearer <token>", confirma a assinatura e
 // guarda os dados do utilizador em req.utilizador para as rotas usarem.
 function verificarToken(req, res, next) {
@@ -39,6 +39,17 @@ function verificarToken(req, res, next) {
     } catch (erro) {
         return res.status(401).json({ erro: 'Sessão inválida ou expirada. Faz login de novo.' });
     }
+}
+
+// GUARDA: exige que o utilizador do token tenha um dos cargos indicados.
+// Usar sempre depois de verificarToken (que preenche req.utilizador.cargo).
+function exigirCargo(...cargos) {
+    return (req, res, next) => {
+        if (!cargos.includes(req.utilizador.cargo)) {
+            return res.status(403).json({ erro: 'Sem permissão para esta operação.' });
+        }
+        next();
+    };
 }
 
 // Cria um token assinado com os dados essenciais do utilizador (válido 8 horas)
@@ -120,7 +131,7 @@ app.get('/api/inventario', verificarToken, async (req, res) => {
 
 
 // Rota para o Dashboard: Dar entrada de um Produto Novo
-app.post('/api/produtos/novo', verificarToken, async (req, res) => {
+app.post('/api/produtos/novo', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     try {
         const { nome, posX, posY, nivel, pesoKg, comprimentoCm, larguraCm, alturaCm, fragil } = req.body;
         const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
@@ -200,7 +211,7 @@ app.post('/api/produtos/novo', verificarToken, async (req, res) => {
 });
 
 // 🔨 CRIAR PRATELEIRA
-app.post('/api/prateleiras/nova', verificarToken, async (req, res) => {
+app.post('/api/prateleiras/nova', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     try {
         // Agora recebe também o armazemID
         const posX = parseInt(req.body.posX);
@@ -218,7 +229,7 @@ app.post('/api/prateleiras/nova', verificarToken, async (req, res) => {
         // 🔒 Recusa se esta prateleira (ou uma já existente) ficasse sem nenhuma célula
         // livre à volta: se não se consegue lá chegar para arrumar, também não se
         // conseguiria voltar lá depois para recolher.
-        const [configs] = await pool.query('SELECT * FROM Configuracoes');
+        const [configs] = await pool.query('SELECT * FROM Configuracoes WHERE ArmazemID = ?', [armazemID]);
         let maxX = existentes.reduce((m, p) => Math.max(m, p.PosX), posX);
         let maxY = existentes.reduce((m, p) => Math.max(m, p.PosY), posY);
         configs.forEach(c => {
@@ -246,7 +257,7 @@ app.post('/api/prateleiras/nova', verificarToken, async (req, res) => {
 
 
 // Rota para Apagar um Produto (só do próprio armazém)
-app.delete('/api/produtos/:id', verificarToken, async (req, res) => {
+app.delete('/api/produtos/:id', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -268,7 +279,7 @@ app.delete('/api/produtos/:id', verificarToken, async (req, res) => {
 });
 
 // Rota para Apagar uma Prateleira (só do próprio armazém E só se estiver vazia)
-app.delete('/api/prateleiras/:id', verificarToken, async (req, res) => {
+app.delete('/api/prateleiras/:id', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     try {
         const { id } = req.params;
         const armazemID = req.utilizador.armazemID;
@@ -294,17 +305,19 @@ app.delete('/api/prateleiras/:id', verificarToken, async (req, res) => {
 
 // Buscar o tamanho guardado
 app.get('/api/config/tamanho', verificarToken, async (req, res) => {
-    const [configs] = await pool.query('SELECT * FROM Configuracoes');
+    const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
+    const [configs] = await pool.query('SELECT * FROM Configuracoes WHERE ArmazemID = ?', [armazemID]);
     const tamanho = {};
     configs.forEach(c => tamanho[c.Chave] = c.Valor);
     res.json(tamanho);
 });
 
 // Guardar novo tamanho
-app.post('/api/config/tamanho', verificarToken, async (req, res) => {
+app.post('/api/config/tamanho', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     const { largura, comprimento } = req.body;
-    await pool.query('UPDATE Configuracoes SET Valor = ? WHERE Chave = "largura"', [largura]);
-    await pool.query('UPDATE Configuracoes SET Valor = ? WHERE Chave = "comprimento"', [comprimento]);
+    const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
+    await pool.query('UPDATE Configuracoes SET Valor = ? WHERE Chave = "largura" AND ArmazemID = ?', [largura, armazemID]);
+    await pool.query('UPDATE Configuracoes SET Valor = ? WHERE Chave = "comprimento" AND ArmazemID = ?', [comprimento, armazemID]);
     res.json({ mensagem: 'Tamanho guardado!' });
 });
 
@@ -372,6 +385,13 @@ app.post('/api/registo', async (req, res) => {
             [nomeArmazem, cidade || null, codigoConvite]
         );
         const armazemID = resArmazem.insertId;
+
+        // 1b. Cada armazém tem a sua própria configuração de tamanho de grelha
+        // (largura/comprimento), isolada dos restantes armazéns.
+        await conn.query(
+            'INSERT INTO Configuracoes (ArmazemID, Chave, Valor) VALUES (?, "largura", "10"), (?, "comprimento", "10")',
+            [armazemID, armazemID]
+        );
 
         // 2. Cria a conta de Gestor ligada a esse armazém
         const senhaHash = await bcrypt.hash(senha, 12);
@@ -443,35 +463,6 @@ app.post('/api/operador/registo', async (req, res) => {
 
 
 
-// 🛒 ROTA DA LOJA: Mostrar os produtos que existem no armazém
-app.get('/api/loja/produtos', async (req, res) => {
-    try {
-        // Agrupa os produtos por nome e conta quantos existem em stock
-        const [produtos] = await pool.query('SELECT Nome, COUNT(ID) as Quantidade FROM Produtos GROUP BY Nome');
-        res.json(produtos);
-    } catch (erro) {
-        console.error("Erro na Loja:", erro);
-        res.status(500).json({ erro: 'Erro ao carregar a loja' });
-    }
-});
-
-// 🛍️ ROTA DA LOJA: O cliente clica em "Comprar"
-app.post('/api/loja/comprar', async (req, res) => {
-    try {
-        const { produtoNome, armazemID } = req.body;
-        if (!armazemID) return res.status(400).json({ erro: 'Falta o armazém.' });
-
-        // Liga a encomenda ao artigo por ArtigoID (FK), não só pelo nome
-        const artigoID = await resolverArtigoID(pool, armazemID, produtoNome);
-        await pool.query('INSERT INTO Encomendas (ProdutoNome, ArtigoID, Estado, ArmazemID) VALUES (?, ?, "Pendente", ?)', [produtoNome, artigoID, armazemID]);
-
-        res.status(200).json({ mensagem: `Boa! Compraste um ${produtoNome}. O armazém já foi avisado!` });
-    } catch (erro) {
-        console.error("Erro na Compra:", erro);
-        res.status(500).json({ erro: 'Erro ao processar compra' });
-    }
-});
-
 // 📊 TABELA DO GESTOR (Versão Final e Estável)
 app.get('/api/gestor/encomendas', verificarToken, async (req, res) => {
     try {
@@ -498,7 +489,7 @@ app.get('/api/gestor/encomendas', verificarToken, async (req, res) => {
 
 
 // 🛒 SIMULADOR: Receber um Carrinho de Compras (COM VALIDAÇÃO DE STOCK 🛡️)
-app.post('/api/encomendas/carrinho', verificarToken, async (req, res) => {
+app.post('/api/encomendas/carrinho', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     const conn = await pool.getConnection();
     try {
         const { carrinho } = req.body;
@@ -654,7 +645,7 @@ app.get('/api/coordenacao/plano', verificarToken, async (req, res) => {
 
         // 2. Carrega a planta do armazém (prateleiras) e as dimensões da grelha
         const [prateleiras] = await pool.query('SELECT PosX, PosY FROM Prateleiras WHERE ArmazemID = ?', [armazemID]);
-        const [configs] = await pool.query('SELECT * FROM Configuracoes');
+        const [configs] = await pool.query('SELECT * FROM Configuracoes WHERE ArmazemID = ?', [armazemID]);
         let maxX = prateleiras.reduce((m, p) => Math.max(m, p.PosX), 1);
         let maxY = prateleiras.reduce((m, p) => Math.max(m, p.PosY), 1);
         configs.forEach(c => {
@@ -740,7 +731,7 @@ app.get('/api/armazem/config', verificarToken, async (req, res) => {
     }
 });
 
-app.post('/api/armazem/config', verificarToken, async (req, res) => {
+app.post('/api/armazem/config', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     try {
         const armazemID = req.utilizador.armazemID;
         const { larguraCorredorM, roboTipoID, prateleiraLarguraCm, prateleiraProfundidadeCm, prateleiraAlturaNivelCm } = req.body;
@@ -814,7 +805,7 @@ app.get('/api/planeamento/otimizar', verificarToken, async (req, res) => {
         const armazemID = req.utilizador.armazemID;
 
         const [prateleiras] = await pool.query('SELECT PosX, PosY FROM Prateleiras WHERE ArmazemID = ?', [armazemID]);
-        const [configs] = await pool.query('SELECT * FROM Configuracoes');
+        const [configs] = await pool.query('SELECT * FROM Configuracoes WHERE ArmazemID = ?', [armazemID]);
         let maxX = prateleiras.reduce((m, p) => Math.max(m, p.PosX), 1);
         let maxY = prateleiras.reduce((m, p) => Math.max(m, p.PosY), 1);
         configs.forEach(c => {
@@ -846,7 +837,7 @@ app.get('/api/planeamento/otimizar', verificarToken, async (req, res) => {
 });
 
 // 📂 IMPORTAR MAPA: Substitui TODA a planta do armazém (apaga a antiga primeiro)
-app.post('/api/armazem/importar', verificarToken, async (req, res) => {
+app.post('/api/armazem/importar', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     const conn = await pool.getConnection();
     try {
         const { prateleiras } = req.body;
@@ -868,7 +859,7 @@ app.post('/api/armazem/importar', verificarToken, async (req, res) => {
             vistasValidacao.add(chave);
             semDuplicados.push({ PosX: plat.posX, PosY: plat.posY });
         }
-        const [configsValidacao] = await pool.query('SELECT * FROM Configuracoes');
+        const [configsValidacao] = await pool.query('SELECT * FROM Configuracoes WHERE ArmazemID = ?', [armazemID]);
         let maxXValidacao = semDuplicados.reduce((m, p) => Math.max(m, p.PosX), 1);
         let maxYValidacao = semDuplicados.reduce((m, p) => Math.max(m, p.PosY), 1);
         configsValidacao.forEach(c => {

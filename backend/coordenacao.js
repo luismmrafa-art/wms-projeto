@@ -94,11 +94,30 @@ function prateleirasBloqueadas(prateleiras, maxX, maxY) {
 }
 
 // Escolhe o depósito/ponto de expedição: célula (1,1) se livre, senão o
-// corredor livre mais próximo dela.
+// corredor livre mais próximo dela por caminho real (BFS a partir dos seus
+// vizinhos livres) — não por distância geométrica, que ignora prateleiras
+// pelo meio e pode devolver uma célula geometricamente próxima mas
+// inalcançável.
 function escolherDeposito(ocupadas, maxX, maxY) {
   if (!ocupadas.has(CHAVE(1, 1))) return { x: 1, y: 1 };
-  const { distancias } = bfs([{ x: 1, y: 1 }], ocupadas, maxX, maxY); // 1,1 ocupada -> vazio
-  // procura a célula livre mais próxima de (1,1) por varrimento
+
+  const vizinhos = acessos(1, 1, ocupadas, maxX, maxY);
+  if (vizinhos.length > 0) {
+    const { distancias } = bfs(vizinhos, ocupadas, maxX, maxY);
+    let melhor = null, best = Infinity;
+    for (const [chave, d] of distancias) {
+      if (d < best) {
+        best = d;
+        const [x, y] = chave.split(',').map(Number);
+        melhor = { x, y };
+      }
+    }
+    if (melhor) return melhor;
+  }
+
+  // Caso degenerado: (1,1) sem nenhum vizinho livre (já muito improvável,
+  // dada a validação de acessibilidade das prateleiras). Aproximação por
+  // distância geométrica, só como último recurso.
   let melhor = null, best = Infinity;
   for (let y = 1; y <= maxY; y++) for (let x = 1; x <= maxX; x++) {
     if (ocupadas.has(CHAVE(x, y))) continue;

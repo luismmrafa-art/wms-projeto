@@ -62,6 +62,92 @@ async function migrar() {
 
   console.log(`Ligado a ${process.env.DB_NAME}. A migrar...\n`);
 
+  // -1. Tabelas base — numa base de dados vazia (primeira instalação), nenhuma
+  // destas tabelas existe ainda. Os passos seguintes desta migração (e o
+  // resto da aplicação) assumem que já existem, por isso são criadas aqui
+  // primeiro, com o esquema mínimo que o servidor usa; os passos seguintes
+  // acrescentam-lhes as colunas e chaves estrangeiras adicionais.
+  await passo('Tabela armazens', async () => {
+    if (await tabelaExiste(conn, 'armazens')) return false;
+    await conn.query(`
+      CREATE TABLE armazens (
+        ID INT AUTO_INCREMENT PRIMARY KEY,
+        Nome VARCHAR(100) NOT NULL,
+        Cidade VARCHAR(100) NULL
+      )
+    `);
+    return true;
+  });
+  await passo('Tabela usuarios', async () => {
+    if (await tabelaExiste(conn, 'usuarios')) return false;
+    await conn.query(`
+      CREATE TABLE usuarios (
+        ID INT AUTO_INCREMENT PRIMARY KEY,
+        Nome VARCHAR(100) NOT NULL,
+        Email VARCHAR(150) NOT NULL,
+        Senha VARCHAR(255) NOT NULL,
+        Cargo VARCHAR(20) NOT NULL,
+        ArmazemID INT NOT NULL
+      )
+    `);
+    return true;
+  });
+  await passo('Tabela prateleiras', async () => {
+    if (await tabelaExiste(conn, 'prateleiras')) return false;
+    await conn.query(`
+      CREATE TABLE prateleiras (
+        ID INT AUTO_INCREMENT PRIMARY KEY,
+        PosX INT NOT NULL,
+        PosY INT NOT NULL,
+        Niveis INT NOT NULL,
+        ArmazemID INT NOT NULL
+      )
+    `);
+    return true;
+  });
+  await passo('Tabela produtos', async () => {
+    if (await tabelaExiste(conn, 'produtos')) return false;
+    await conn.query(`
+      CREATE TABLE produtos (
+        ID INT AUTO_INCREMENT PRIMARY KEY,
+        Nome VARCHAR(100) NOT NULL,
+        PrateleiraID INT NOT NULL,
+        Nivel INT NOT NULL,
+        ArmazemID INT NOT NULL
+      )
+    `);
+    return true;
+  });
+  await passo('Tabela encomendas', async () => {
+    if (await tabelaExiste(conn, 'encomendas')) return false;
+    await conn.query(`
+      CREATE TABLE encomendas (
+        ID INT AUTO_INCREMENT PRIMARY KEY,
+        ProdutoNome VARCHAR(100) NULL,
+        Quantidade INT NOT NULL DEFAULT 1,
+        Estado VARCHAR(30) NOT NULL DEFAULT 'Pendente',
+        Data DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        ArmazemID INT NOT NULL
+      )
+    `);
+    return true;
+  });
+  // Configuracoes e isolada por armazem (chave composta ArmazemID+Chave) desde
+  // o inicio numa instalacao nova; cada armazem e semeado com o seu proprio
+  // largura/comprimento no momento em que e criado (ver /api/registo).
+  await passo('Tabela configuracoes', async () => {
+    if (await tabelaExiste(conn, 'configuracoes')) return false;
+    await conn.query(`
+      CREATE TABLE configuracoes (
+        ArmazemID INT NOT NULL,
+        Chave VARCHAR(50) NOT NULL,
+        Valor VARCHAR(50) NOT NULL,
+        PRIMARY KEY (ArmazemID, Chave)
+      )
+    `);
+    return true;
+  });
+
   // 0. Limpeza: sem FK real, ficaram registos órfãos de armazéns já apagados
   // (sintoma direto do problema que esta migração resolve). Remove-os antes
   // de introduzir as chaves estrangeiras, para não bloquear a criação.
@@ -276,6 +362,44 @@ async function migrar() {
       ADD COLUMN PrateleiraLarguraCm DECIMAL(6,1) NOT NULL DEFAULT 100.0,
       ADD COLUMN PrateleiraProfundidadeCm DECIMAL(6,1) NOT NULL DEFAULT 60.0,
       ADD COLUMN PrateleiraAlturaNivelCm DECIMAL(6,1) NOT NULL DEFAULT 40.0`);
+    return true;
+  });
+
+  // 8. Isolamento de configuracoes por armazém — a versão anterior tinha uma
+  // única linha global por chave (largura/comprimento), partilhada por todos
+  // os armazéns: um gestor a gravar o tamanho do seu armazém alterava o de
+  // todos os outros. Migra para chave composta (ArmazemID, Chave), semeando
+  // cada armazém existente com os valores globais antigos como ponto de
+  // partida (cada um pode depois ajustá-los sem afetar os restantes).
+  await passo('Coluna configuracoes.ArmazemID', async () => {
+    if (await colunaExiste(conn, 'configuracoes', 'ArmazemID')) return false;
+    await conn.query(`ALTER TABLE configuracoes ADD COLUMN ArmazemID INT NULL`);
+    return true;
+  });
+  // Backfill + chave composta num único passo: a tabela ainda tem a PK antiga
+  // (só em Chave) enquanto os valores globais não forem removidos, por isso
+  // teria de inserir uma linha por armazém com o MESMO Chave, o que colide
+  // com essa PK antiga. Ordem que evita o conflito: ler os valores globais,
+  // apagá-los (a tabela fica temporariamente vazia), só depois trocar para a
+  // chave composta (ArmazemID, Chave), e só então inserir uma linha por
+  // armazém — já sem colisão possível.
+  await passo('Isolar configuracoes por armazém (backfill + chave composta)', async () => {
+    const [semArmazem] = await conn.query('SELECT Chave, Valor FROM configuracoes WHERE ArmazemID IS NULL');
+    if (semArmazem.length === 0) return false;
+
+    await conn.query('DELETE FROM configuracoes WHERE ArmazemID IS NULL');
+    await conn.query('ALTER TABLE configuracoes MODIFY COLUMN ArmazemID INT NOT NULL');
+    await conn.query('ALTER TABLE configuracoes DROP PRIMARY KEY, ADD PRIMARY KEY (ArmazemID, Chave)');
+
+    const [armazensExistentes] = await conn.query('SELECT ID FROM armazens');
+    for (const a of armazensExistentes) {
+      for (const c of semArmazem) {
+        await conn.query(
+          'INSERT IGNORE INTO configuracoes (ArmazemID, Chave, Valor) VALUES (?, ?, ?)',
+          [a.ID, c.Chave, c.Valor]
+        );
+      }
+    }
     return true;
   });
 

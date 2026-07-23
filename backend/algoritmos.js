@@ -32,8 +32,24 @@ const { bfs, acessos, escolherDeposito, calcularDistanciasTarefa } = require('./
 const { custoTarefaComAtribuicao, opcaoRoboViavel, tempoEmSegundos } = require('./custoDecisao');
 
 const LIMITE_EXATO = 7; // 7! x 2^7 ~ 645 mil combinações; acima disto, recusa-se (ver relatório)
+const SEMENTE_PREDEFINIDA = 42; // reprodutibilidade por omissão da meta-heurística (ver resolverMetaheuristica)
 
 function chave(x, y) { return `${x},${y}`; }
+
+// Gerador pseudoaleatório determinístico (mulberry32) — Math.random() não
+// aceita semente, o que tornava os resultados da meta-heurística diferentes
+// a cada execução (Tabelas 4/8/9 do relatório). Com semente fixa, o mesmo
+// cenário produz sempre a mesma solução; um chamador que queira variar entre
+// execuções passa opcoes.semente explicitamente.
+function criarGeradorAleatorio(semente) {
+  let estado = semente >>> 0;
+  return function random() {
+    estado |= 0; estado = (estado + 0x6D2B79F5) | 0;
+    let t = Math.imul(estado ^ (estado >>> 15), 1 | estado);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 // Resolve o depósito uma única vez (se não vier definido) para que a posição
 // inicial do operador seja consistente entre a preparação das tarefas e a
@@ -46,9 +62,22 @@ function normalizarContexto(ctx) {
   return { ...ctx, deposito };
 }
 
-function distanciaPosicaoAPrateleira(pos, alvoX, alvoY, ocupadas, maxX, maxY) {
+// As posições de origem possíveis do operador, ao longo de uma sequência,
+// são poucas: o depósito e um ponto de encontro por tarefa (no máximo N+1
+// valores distintos para N tarefas). O exato reavalia a mesma sequência de
+// posições em cada permutação × atribuição, pelo que a mesma origem volta a
+// aparecer muitas vezes; cacheBfs (por chamada ao algoritmo, nunca partilhada
+// entre pedidos) evita recalcular a BFS a partir da mesma origem repetida.
+function distanciaPosicaoAPrateleira(pos, alvoX, alvoY, ocupadas, maxX, maxY, cacheBfs) {
   const cellsAcesso = acessos(alvoX, alvoY, ocupadas, maxX, maxY);
-  const { distancias } = bfs([pos], ocupadas, maxX, maxY);
+  const chavePos = chave(pos.x, pos.y);
+  let distancias;
+  if (cacheBfs && cacheBfs.has(chavePos)) {
+    distancias = cacheBfs.get(chavePos);
+  } else {
+    distancias = bfs([pos], ocupadas, maxX, maxY).distancias;
+    if (cacheBfs) cacheBfs.set(chavePos, distancias);
+  }
   let min = Infinity;
   for (const c of cellsAcesso) {
     const d = distancias.get(chave(c.x, c.y));
@@ -83,7 +112,7 @@ function custoTarefa(prep, atribuicao, robo, velocidadeHumanoMS) {
 // Custo total de uma sequência completa (ordem + atribuições), incluindo a
 // deslocação (sem carga) do operador entre o fim de uma tarefa e o início da
 // seguinte. É a função objetivo que os três algoritmos minimizam.
-function avaliarSequencia(preparadas, ordem, atribuicoes, ctx) {
+function avaliarSequencia(preparadas, ordem, atribuicoes, ctx, cacheBfs) {
   const { prateleiras, maxX, maxY, deposito, robo, velocidadeHumanoMS } = ctx;
   const ocupadas = new Set(prateleiras.map(p => chave(p.PosX, p.PosY)));
 
@@ -96,7 +125,7 @@ function avaliarSequencia(preparadas, ordem, atribuicoes, ctx) {
   for (const idx of ordem) {
     const prep = preparadas[idx];
     const atribuicao = atribuicoes[idx];
-    const desloc = distanciaPosicaoAPrateleira(pos, prep.tarefa.PosX, prep.tarefa.PosY, ocupadas, maxX, maxY);
+    const desloc = distanciaPosicaoAPrateleira(pos, prep.tarefa.PosX, prep.tarefa.PosY, ocupadas, maxX, maxY, cacheBfs);
     const tempoDesloc = tempoEmSegundos(Number.isFinite(desloc) ? desloc : 0, velocidadeHumanoMS);
     const custo = custoTarefa(prep, atribuicao, robo, velocidadeHumanoMS);
 
@@ -152,10 +181,11 @@ function resolverExato(tarefas, ctxOriginal) {
     for (const op of opcoes) { atual[i] = op; gerar(i + 1, atual); }
   })(0, {});
 
+  const cacheBfs = new Map();
   let melhor = null;
   for (const ordem of permutacoes(indices)) {
     for (const atribuicoes of combinacoesAtribuicao) {
-      const r = avaliarSequencia(preparadas, ordem, atribuicoes, ctx);
+      const r = avaliarSequencia(preparadas, ordem, atribuicoes, ctx, cacheBfs);
       if (!melhor || r.custoTotal < melhor.custoTotal) melhor = { ordem: [...ordem], atribuicoes: { ...atribuicoes }, ...r };
     }
   }
@@ -174,6 +204,7 @@ function resolverGuloso(tarefas, ctxOriginal) {
   const ocupadas = new Set(prateleiras.map(p => chave(p.PosX, p.PosY)));
   const preparadas = prepararTarefas(tarefas, ctx);
 
+  const cacheBfs = new Map();
   const restantes = new Set(preparadas.map((_, i) => i));
   const ordem = [];
   const atribuicoes = {};
@@ -182,7 +213,7 @@ function resolverGuloso(tarefas, ctxOriginal) {
   while (restantes.size > 0) {
     let melhorIdx = null, melhorDist = Infinity;
     for (const idx of restantes) {
-      const d = distanciaPosicaoAPrateleira(pos, preparadas[idx].tarefa.PosX, preparadas[idx].tarefa.PosY, ocupadas, maxX, maxY);
+      const d = distanciaPosicaoAPrateleira(pos, preparadas[idx].tarefa.PosX, preparadas[idx].tarefa.PosY, ocupadas, maxX, maxY, cacheBfs);
       if (d < melhorDist) { melhorDist = d; melhorIdx = idx; }
     }
     const prep = preparadas[melhorIdx];
@@ -193,7 +224,7 @@ function resolverGuloso(tarefas, ctxOriginal) {
     restantes.delete(melhorIdx);
   }
 
-  const r = avaliarSequencia(preparadas, ordem, atribuicoes, ctx);
+  const r = avaliarSequencia(preparadas, ordem, atribuicoes, ctx, cacheBfs);
   return { algoritmo: 'guloso', ordem, atribuicoes, ...r, tempoCalculoMs: Date.now() - inicio };
 }
 
@@ -208,6 +239,7 @@ function resolverMetaheuristica(tarefas, ctxOriginal, opcoes = {}) {
   const iteracoes = opcoes.iteracoes || 800;
   const temperaturaInicial = opcoes.temperaturaInicial || 50;
   const arrefecimento = opcoes.arrefecimento || 0.995;
+  const semente = opcoes.semente ?? SEMENTE_PREDEFINIDA;
 
   const preparadas = prepararTarefas(tarefas, ctx);
   if (preparadas.length === 0) return { algoritmo: 'meta-heuristica', ordem: [], atribuicoes: {}, custoTotal: 0, tempoCalculoMs: Date.now() - inicio };
@@ -220,7 +252,8 @@ function resolverMetaheuristica(tarefas, ctxOriginal, opcoes = {}) {
   let melhorOrdem = [...ordemAtual], melhorAtrib = { ...atribAtual }, melhorCusto = custoAtual;
 
   let temperatura = temperaturaInicial;
-  const random = () => Math.random();
+  const random = criarGeradorAleatorio(semente);
+  const cacheBfs = new Map();
 
   for (let it = 0; it < iteracoes && preparadas.length > 1; it++) {
     const novaOrdem = [...ordemAtual];
@@ -240,7 +273,7 @@ function resolverMetaheuristica(tarefas, ctxOriginal, opcoes = {}) {
       }
     }
 
-    const r = avaliarSequencia(preparadas, novaOrdem, novaAtrib, ctx);
+    const r = avaliarSequencia(preparadas, novaOrdem, novaAtrib, ctx, cacheBfs);
     const delta = r.custoTotal - custoAtual;
 
     if (delta < 0 || random() < Math.exp(-delta / Math.max(temperatura, 1e-6))) {
@@ -251,7 +284,7 @@ function resolverMetaheuristica(tarefas, ctxOriginal, opcoes = {}) {
     temperatura *= arrefecimento;
   }
 
-  const final = avaliarSequencia(preparadas, melhorOrdem, melhorAtrib, ctx);
+  const final = avaliarSequencia(preparadas, melhorOrdem, melhorAtrib, ctx, cacheBfs);
   return { algoritmo: 'meta-heuristica', ordem: melhorOrdem, atribuicoes: melhorAtrib, ...final, tempoCalculoMs: Date.now() - inicio };
 }
 
@@ -266,5 +299,5 @@ function compararAlgoritmos(tarefas, ctx) {
 
 module.exports = {
   resolverExato, resolverGuloso, resolverMetaheuristica, compararAlgoritmos,
-  prepararTarefas, avaliarSequencia, LIMITE_EXATO,
+  prepararTarefas, avaliarSequencia, LIMITE_EXATO, SEMENTE_PREDEFINIDA,
 };

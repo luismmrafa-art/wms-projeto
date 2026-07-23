@@ -51,7 +51,11 @@ function custoTarefaComAtribuicao({
 
   if (atribuicao === 'humano_sozinho' || !robo) {
     const tempoOperadorH = tempoEmSegundos(distanciaOperadorSemRobo, velocidadeHumanoMS);
-    return { atribuicao: 'humano_sozinho', tempoOperadorH, tempoRoboH: 0, custoTotal: tempoOperadorH, alertas };
+    // Mesma ponderação da opção com robô (linha 63), para as duas ficarem na
+    // mesma escala — sem isto, esta opção fica artificialmente mais cara
+    // (÷0,7) e a decisão inclina-se para o robô mesmo quando não compensa.
+    const custoTotal = PESO_ESFORCO_OPERADOR * tempoOperadorH;
+    return { atribuicao: 'humano_sozinho', tempoOperadorH, tempoRoboH: 0, custoTotal, alertas };
   }
 
   const tempoOperadorH = tempoEmSegundos(distanciaOperadorAteEncontro, velocidadeHumanoMS);
