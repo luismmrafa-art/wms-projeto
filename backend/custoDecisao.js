@@ -25,13 +25,20 @@ function tempoEmSegundos(distanciaCelulas, velocidadeMS) {
   return (distanciaCelulas * TAMANHO_CELULA_M) / velocidadeMS;
 }
 
-// Um artigo só pode ir de robô se o robô existir e aguentar o peso.
+// Um artigo só pode ir de robô se o robô existir e aguentar o peso total da
+// tarefa — peso unitário × quantidade, já que o operador recolhe e entrega
+// todas as unidades da tarefa de uma vez, não uma a uma.
 // Usado pelos algoritmos de planeamento (algoritmos.js) para saber que
 // atribuições são sequer possíveis de testar/trocar.
+function pesoTotalTarefa(artigo) {
+  const pesoUnitario = Number(artigo?.PesoKg ?? 1);
+  const quantidade = Number(artigo?.Quantidade ?? 1);
+  return pesoUnitario * quantidade;
+}
+
 function opcaoRoboViavel(robo, artigo) {
   if (!robo) return false;
-  const pesoArtigo = Number(artigo?.PesoKg ?? 1);
-  return pesoArtigo <= Number(robo.CapacidadeCargaKg);
+  return pesoTotalTarefa(artigo) <= Number(robo.CapacidadeCargaKg);
 }
 
 // Custo de UMA tarefa sob uma atribuição já decidida (não escolhe — só mede).
@@ -85,7 +92,13 @@ function avaliarTarefa({
   });
 
   if (!opcaoRoboViavel(robo, artigo)) {
-    if (robo) alertas.push(`Artigo (${artigo?.PesoKg ?? '?'} kg) excede a capacidade do robô "${robo.Nome}" (${robo.CapacidadeCargaKg} kg).`);
+    if (robo) {
+      const quantidade = Number(artigo?.Quantidade ?? 1);
+      const descricaoPeso = quantidade > 1
+        ? `${pesoTotalTarefa(artigo)} kg (${artigo?.PesoKg ?? '?'} kg × ${quantidade} unidades)`
+        : `${artigo?.PesoKg ?? '?'} kg`;
+      alertas.push(`Artigo (${descricaoPeso}) excede a capacidade do robô "${robo.Nome}" (${robo.CapacidadeCargaKg} kg).`);
+    }
     return { ...semRobo, motivo: robo ? 'Peso acima da capacidade do robô — opção robô inviável, não apenas pior.' : 'Nenhum robô compatível com este armazém.', alertas };
   }
 
@@ -104,6 +117,7 @@ module.exports = {
   avaliarTarefa,
   custoTarefaComAtribuicao,
   opcaoRoboViavel,
+  pesoTotalTarefa,
   tempoEmSegundos,
   TAMANHO_CELULA_M,
   FATOR_RISCO_FRAGIL,

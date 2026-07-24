@@ -145,7 +145,6 @@
                         <option value="">Automático (recomendado)</option>
                     </select>
                 </div>
-                <div style="font-size:12px; color:#888; margin:-6px 0 10px;">Tamanho das prateleiras — igual em todo o armazém:</div>
                 <div style="display:flex; gap:5px">
                     <div class="campo" style="flex:1"><label>Larg. (cm):</label><input type="number" id="configPrateleiraLargura" value="100" min="1"></div>
                     <div class="campo" style="flex:1"><label>Prof. (cm):</label><input type="number" id="configPrateleiraProfundidade" value="60" min="1"></div>
@@ -225,6 +224,17 @@
     </div>
 
     <script>
+        // Escapa texto antes de o inserir via innerHTML — nomes de artigos,
+        // produtos e mensagens de erro podem conter texto escrito pelo
+        // utilizador (ou vindo de outro utilizador do mesmo armazém), e sem
+        // isto um nome como "<img src=x onerror=alert(1)>" executaria no
+        // painel do gestor (XSS armazenado).
+        function esc(s) {
+            const div = document.createElement('div');
+            div.textContent = s ?? '';
+            return div.innerHTML;
+        }
+
         // --- TOKEN AUTOMÁTICO ---
         // "Embrulha" o fetch para anexar o token de login a TODOS os pedidos /api/.
         // Assim nenhuma chamada fica de fora e, se a sessão expirar (401), volta ao login.
@@ -400,7 +410,7 @@
                 }
                 setTimeout(() => alert(`🚚 Operação Concluída na Posição X:${alvoX}, Y:${alvoY}!`), 100);
             } else {
-                alert("🚨 Bip Bop! Caminho bloqueado. Não consigo chegar a essa prateleira!");
+                alert("Caminho bloqueado. Não consigo chegar a essa prateleira!");
             }
             
             roboOcupado = false;
@@ -513,7 +523,7 @@
             } else {
                 const erro = await res.json();
                 // Erro de encaixe (não cabe na prateleira): mostra por baixo do formulário, não só num alert.
-                document.getElementById('prodDimsAviso').innerHTML = `<span style="color:#e63946;">⚠️ ${erro.erro || 'Falha ao guardar.'}</span>`;
+                document.getElementById('prodDimsAviso').innerHTML = `<span style="color:#e63946;">⚠️ ${esc(erro.erro || 'Falha ao guardar.')}</span>`;
                 alert("❌ Erro: " + (erro.erro || "Falha ao guardar."));
             }
         }
@@ -558,7 +568,7 @@
 
                 const select = document.getElementById('configRoboTipo');
                 select.innerHTML = '<option value="">Automático (recomendado)</option>' +
-                    tipos.map(t => `<option value="${t.ID}">${t.Nome} (${t.CapacidadeCargaKg} kg · ${t.VelocidadeMS} m/s · ${t.ComprimentoCm}×${t.LarguraCm}×${t.AlturaCm} cm)</option>`).join('');
+                    tipos.map(t => `<option value="${t.ID}">${esc(t.Nome)} (${t.CapacidadeCargaKg} kg · ${t.VelocidadeMS} m/s · ${t.ComprimentoCm}×${t.LarguraCm}×${t.AlturaCm} cm (C×L×A) · corredor mín. ${t.LarguraMinCorredorM} m)</option>`).join('');
                 select.value = config.RoboTipoID ?? '';
             } catch (e) { /* mantém os valores por omissão do HTML */ }
         }
@@ -595,7 +605,7 @@
             try {
                 const res = await fetch('/api/planeamento/otimizar');
                 const r = await res.json();
-                if (r.erro) { div.innerHTML = `<span style="color:#e63946;">${r.erro}</span>`; return; }
+                if (r.erro) { div.innerHTML = `<span style="color:#e63946;">${esc(r.erro)}</span>`; return; }
                 if (!r.totalTarefas) { div.innerHTML = 'Não há tarefas pendentes com localização conhecida para planear.'; return; }
 
                 const linhas = ['exato', 'guloso', 'metaheuristica'].map(k => {
@@ -632,7 +642,7 @@
         function abrirModal(plat, prods) {
             document.getElementById('modalTitulo').innerText = `X:${plat.PosX} Y:${plat.PosY} | Altura: ${plat.Niveis}`;
             const divConteudo = document.getElementById('modalConteudo');
-            divConteudo.innerHTML = prods.length===0 ? '<p>Vazio</p>' : prods.map(p => `<div class="item-produto"><span><b>Nv${p.Nivel}:</b> ${p.Nome} <small style="color:#888;">(${p.PesoKg ?? '?'} kg${p.Fragil ? ' · ⚠️ frágil' : ''})</small></span><button class="btn-lixo" onclick="apagarProduto(${p.ID})">🗑️</button></div>`).join('');
+            divConteudo.innerHTML = prods.length===0 ? '<p>Vazio</p>' : prods.map(p => `<div class="item-produto"><span><b>Nv${p.Nivel}:</b> ${esc(p.Nome)} <small style="color:#888;">(${p.PesoKg ?? '?'} kg${p.Fragil ? ' · ⚠️ frágil' : ''})</small></span><button class="btn-lixo" onclick="apagarProduto(${p.ID})">🗑️</button></div>`).join('');
             
             document.getElementById('btnDestruir').onclick = () => apagarPrateleira(plat.ID);
             document.getElementById('btnChamarRobo').onclick = () => moverRobo(plat.PosX, plat.PosY);
@@ -736,8 +746,8 @@
                 <tr style="border-bottom: 1px solid #eee;">
                     <td style="padding: 10px; font-weight: bold; color: #1d3557;">#${v.ID}</td>
                     <td style="padding: 10px; color: #555;">${dataFormatada}</td>
-                    <td style="padding: 10px;">${v.Cliente}</td>
-                    <td style="padding: 10px;"><b>${v.ProdutoNome}</b></td>
+                    <td style="padding: 10px;">${esc(v.Cliente)}</td>
+                    <td style="padding: 10px;"><b>${esc(v.ProdutoNome)}</b></td>
                     <td style="padding: 10px;">
                         <span style="background: ${corEstado}; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight:bold;">
                             ${v.Estado.toUpperCase()}
@@ -782,7 +792,7 @@
             carrinhoDeCompras.forEach((item, i) => {
                 const li = document.createElement('li');
                 li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background:#f8f9fa; border:1px solid #e9ecef; border-radius:6px; padding:6px 10px; margin-bottom:5px;';
-                li.innerHTML = `<span>✔️ ${item.qtd}x ${item.nome}</span>`;
+                li.innerHTML = `<span>✔️ ${item.qtd}x ${esc(item.nome)}</span>`;
                 const btn = document.createElement('button');
                 btn.textContent = '✖';
                 btn.title = 'Remover';

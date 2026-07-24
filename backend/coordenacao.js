@@ -24,6 +24,21 @@ function ehCorredorPrincipal(x, y, maxX, maxY) {
   return x === 1 || x === maxX || y === 1 || y === maxY;
 }
 
+// Bloqueia, para além das prateleiras, todas as células fora do perímetro —
+// usado para restringir a rota do robô ao corredor principal (rotas fixas e
+// previsíveis, conforme o modelo descrito no relatório). Sem isto, uma BFS
+// livre podia cortar por corredores interiores sempre que isso fosse mais
+// curto, contradizendo essa restrição.
+function bloquearForaDoPerimetro(ocupadas, maxX, maxY) {
+  const bloqueadas = new Set(ocupadas);
+  for (let y = 1; y <= maxY; y++) {
+    for (let x = 1; x <= maxX; x++) {
+      if (!ehCorredorPrincipal(x, y, maxX, maxY)) bloqueadas.add(CHAVE(x, y));
+    }
+  }
+  return bloqueadas;
+}
+
 // BFS multi-origem sobre as células livres (as prateleiras são obstáculos).
 // Devolve: distancias (Map chave->passos) e anteriores (para reconstruir caminho).
 function bfs(origens, ocupadas, maxX, maxY) {
@@ -164,8 +179,17 @@ function calcularDistanciasTarefa({ prateleiras, maxX, maxY, alvoX, alvoY, depos
   // Se não houver corredor de perímetro alcançável, o encontro é o próprio acesso.
   if (!pontoEncontro) { pontoEncontro = cellsAcesso[0]; distOperadorAteEncontro = 0; }
 
-  // 4. Rota do robô: do depósito até ao ponto de encontro (algoritmo exato).
-  const { distancias: distDep, anteriores: antDep } = bfs([dep], ocupadas, maxX, maxY);
+  // 4. Rota do robô: do depósito até ao ponto de encontro, restrita ao
+  // corredor principal (perímetro) — o robô não corta por corredores
+  // interiores, mesmo que isso fosse geometricamente mais curto. Recorre à
+  // BFS livre só no caso degenerado em que o próprio ponto de encontro caiu
+  // fora do perímetro (sem corredor de perímetro alcançável perto da
+  // prateleira — ver o fallback acima).
+  const ocupadasRobo = bloquearForaDoPerimetro(ocupadas, maxX, maxY);
+  let { distancias: distDep, anteriores: antDep } = bfs([dep], ocupadasRobo, maxX, maxY);
+  if (!distDep.has(CHAVE(pontoEncontro.x, pontoEncontro.y))) {
+    ({ distancias: distDep, anteriores: antDep } = bfs([dep], ocupadas, maxX, maxY));
+  }
   const distRoboAteEncontro = distDep.get(CHAVE(pontoEncontro.x, pontoEncontro.y));
   const rotaRobo = reconstruirCaminho(antDep, pontoEncontro);
 
