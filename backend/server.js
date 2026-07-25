@@ -577,11 +577,28 @@ app.post('/api/operador/concluir', verificarToken, async (req, res) => {
         await conn.commit();
 
         if (posicao.length > 0) {
-            radarRobo[ArmazemID] = {
-                posX: posicao[0].PosX,
-                posY: posicao[0].PosY,
-                timestamp: Date.now()
-            };
+            // O radar mostra o robô no PONTO DE ENCONTRO, não na prateleira — o
+            // robô nunca vai à prateleira, só o operador. Recalcula o mesmo plano
+            // de coordenação que a app já tinha mostrado antes de confirmar.
+            const [prateleirasArmazem] = await pool.query('SELECT PosX, PosY FROM Prateleiras WHERE ArmazemID = ?', [ArmazemID]);
+            const [configsArmazem] = await pool.query('SELECT * FROM Configuracoes WHERE ArmazemID = ?', [ArmazemID]);
+            let maxXArmazem = prateleirasArmazem.reduce((m, p) => Math.max(m, p.PosX), 1);
+            let maxYArmazem = prateleirasArmazem.reduce((m, p) => Math.max(m, p.PosY), 1);
+            configsArmazem.forEach(c => {
+                if (c.Chave === 'largura') maxXArmazem = Math.max(maxXArmazem, c.Valor);
+                if (c.Chave === 'comprimento') maxYArmazem = Math.max(maxYArmazem, c.Valor);
+            });
+            const plano = planearRecolha({
+                prateleiras: prateleirasArmazem, maxX: maxXArmazem, maxY: maxYArmazem,
+                alvoX: posicao[0].PosX, alvoY: posicao[0].PosY,
+            });
+            if (!plano.erro) {
+                radarRobo[ArmazemID] = {
+                    posX: plano.pontoEncontro.x,
+                    posY: plano.pontoEncontro.y,
+                    timestamp: Date.now()
+                };
+            }
         }
 
         res.json({ mensagem: 'Recolha confirmada com sucesso!' });
