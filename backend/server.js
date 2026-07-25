@@ -3,7 +3,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken'); // Para criar/verificar os tokens de login
 const pool = require('./db'); // Agora chama o pool do MySQL
-const { planearRecolha, calcularDistanciasTarefa } = require('./coordenacao'); // BFS: distâncias e rotas
+const { planearRecolha, calcularDistanciasTarefa, prateleirasBloqueadas } = require('./coordenacao'); // BFS: distâncias e rotas
 const { obterOuCriarArtigo, resolverArtigoID, caberNaPrateleira } = require('./artigos'); // Dados mestre do artigo (peso, dimensões, frágil)
 const { listarTiposRobo, recomendarRobo, VELOCIDADE_HUMANO_MS } = require('./robos'); // Catálogo e recomendação de robôs (SAD)
 const { avaliarTarefa } = require('./custoDecisao'); // Decisão multicritério humano/robô
@@ -12,7 +12,9 @@ require('dotenv').config();
 
 const JWT_SECRET = process.env.JWT_SECRET; // Segredo que assina os tokens (vem do .env)
 
-// 🤖 Memória Global do Radar (Guarda a última posição do robô para cada Armazém)
+// Memória do "radar": guarda em RAM a última posição conhecida do robô virtual
+// para cada armazém (chave = ArmazemID). É só um objeto simples, não fica
+// gravado na base de dados, por isso esta informação perde-se se o servidor reiniciar.
 let radarRobo = {};
 
 const app = express();
@@ -86,17 +88,19 @@ async function buscarTarefasPendentes(armazemID) {
     return tarefas.map(t => ({ ...t, Produto: t.Nome, PesoKg: Number(t.PesoKg) }));
 }
 
-// 📱 APP DO OPERADOR: Buscar lista de tarefas
+// Endpoint chamado pela app do operador (Flutter) para listar as tarefas de
+// picking por fazer neste armazém.
 app.get('/api/tarefas/pendentes', verificarToken, async (req, res) => {
     try {
-        const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
+        const armazemID = req.utilizador.armazemID; // do token, não do cliente (evita que alguém peça dados de outro armazém)
         const tarefas = await buscarTarefasPendentes(armazemID);
 
-        // 🚨 CORREÇÃO: Devolvemos sempre a lista (mesmo que esteja vazia) para o Flutter ficar feliz!
+        // Devolve sempre um array (mesmo vazio), nunca null/undefined, porque a
+        // app espera sempre uma lista para conseguir desenhar o ecrã.
         res.json(tarefas);
 
     } catch (erro) {
-        console.error("🚨 Erro a buscar tarefas:", erro.message);
+        console.error("Erro a buscar tarefas:", erro.message);
         res.status(500).json({ erro: 'Erro no servidor' });
     }
 });
@@ -104,18 +108,19 @@ app.get('/api/tarefas/pendentes', verificarToken, async (req, res) => {
 
 
 
-// 📦 INVENTÁRIO: O Filtro Mágico (Só envia as prateleiras do armazém certo)
+// Devolve o mapa completo do armazém (prateleiras + produtos arrumados) para
+// desenhar o ecrã principal do backoffice. Filtra sempre por ArmazemID, para
+// um gestor nunca ver o armazém de outra empresa.
 app.get('/api/inventario', verificarToken, async (req, res) => {
     try {
-        const armazemId = req.utilizador.armazemID; // 🔒 do token, não do cliente
-        
+        const armazemId = req.utilizador.armazemID; // do token, não do cliente (o utilizador não pode escolher o armazém de outra pessoa)
+
         if (!armazemId) {
             return res.status(400).json({ erro: 'Falta o ID do armazém.' });
         }
 
-        // Filtramos com WHERE ArmazemID = ?
         const [prateleiras] = await pool.query('SELECT * FROM Prateleiras WHERE ArmazemID = ?', [armazemId]);
-        // 📦 Junta os atributos do artigo (peso, dimensões, frágil) via ArtigoID
+        // Junta os atributos do artigo (peso, dimensões, frágil) via ArtigoID
         const [produtos] = await pool.query(`
             SELECT p.*, a.PesoKg, a.Fragil, a.ComprimentoCm, a.LarguraCm, a.AlturaCm
             FROM Produtos p
@@ -130,11 +135,13 @@ app.get('/api/inventario', verificarToken, async (req, res) => {
 });
 
 
-// Rota para o Dashboard: Dar entrada de um Produto Novo
+// Dar entrada de stock: arruma X unidades de um artigo numa prateleira/nível
+// concretos. Valida o nível, valida se o artigo cabe fisicamente na prateleira
+// e só depois grava. Só o Gestor pode usar esta rota (exigirCargo).
 app.post('/api/produtos/novo', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     try {
         const { nome, posX, posY, nivel, pesoKg, comprimentoCm, larguraCm, alturaCm, fragil } = req.body;
-        const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
+        const armazemID = req.utilizador.armazemID; // do token, não do cliente (o utilizador não pode escolher o armazém de outra pessoa)
 
         // Quantidade de unidades a arrumar (1 por defeito). Cada unidade é uma linha.
         const quantidade = parseInt(req.body.quantidade) || 1;
@@ -144,7 +151,7 @@ app.post('/api/produtos/novo', verificarToken, exigirCargo('Gestor'), async (req
 
         console.log(`📦 Tentar arrumar: ${quantidade}x [${nome}] no X:${posX}, Y:${posY}, Nível:${nivel} do Armazém:${armazemID}`);
 
-        // 1. Encontra a prateleira pelas coordenadas E pelo Armazém 🔐
+        // 1. Encontra a prateleira pelas coordenadas E pelo Armazém
         const [prateleiras] = await pool.query(
             'SELECT ID, Niveis FROM Prateleiras WHERE PosX = ? AND PosY = ? AND ArmazemID = ?',
             [posX, posY, armazemID]
@@ -210,20 +217,47 @@ app.post('/api/produtos/novo', verificarToken, exigirCargo('Gestor'), async (req
     }
 });
 
-// 🔨 CRIAR PRATELEIRA
+// Cria uma prateleira nova numa célula da grelha do armazém. Antes de
+// construir, verifica se a posição já está ocupada e se a nova prateleira não
+// vai deixar alguma prateleira (nova ou já existente) totalmente cercada, sem
+// nenhuma célula livre à volta para o operador lá chegar.
 app.post('/api/prateleiras/nova', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     try {
         // Agora recebe também o armazemID
         const posX = parseInt(req.body.posX);
         const posY = parseInt(req.body.posY);
         const niveis = req.body.niveis;
-        const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
+        const armazemID = req.utilizador.armazemID; // do token, não do cliente (o utilizador não pode escolher o armazém de outra pessoa)
 
         const [existentes] = await pool.query('SELECT PosX, PosY FROM Prateleiras WHERE ArmazemID = ?', [armazemID]);
 
         // Não deixa construir duas prateleiras na mesma célula
         if (existentes.some(p => p.PosX === posX && p.PosY === posY)) {
             return res.status(400).json({ erro: 'Já existe uma prateleira nessa posição.' });
+        }
+
+        // Recusa se esta prateleira nova PIORAR a situação (bloquear algo que
+        // ainda estava acessível). Uma prateleira já bloqueada antes desta ação
+        // não impede, sozinha, a construção de novas prateleiras sem relação com ela.
+        //
+        // maxX/maxY definem o tamanho da grelha do armazém (largura x comprimento),
+        // usado pela função prateleirasBloqueadas para saber onde acaba o armazém.
+        const [configs] = await pool.query('SELECT * FROM Configuracoes WHERE ArmazemID = ?', [armazemID]);
+        let maxX = existentes.reduce((m, p) => Math.max(m, p.PosX), posX);
+        let maxY = existentes.reduce((m, p) => Math.max(m, p.PosY), posY);
+        configs.forEach(c => {
+            if (c.Chave === 'largura') maxX = Math.max(maxX, c.Valor);
+            if (c.Chave === 'comprimento') maxY = Math.max(maxY, c.Valor);
+        });
+        // Compara o "antes" (situação atual) com o "depois" (situação com a
+        // prateleira nova já incluída) e só rejeita as que ficam bloqueadas de novo.
+        const bloqueadasAntes = new Set(prateleirasBloqueadas(existentes, maxX, maxY).map(b => `${b.x},${b.y}`));
+        const candidatas = [...existentes, { PosX: posX, PosY: posY }];
+        const novasBloqueadas = prateleirasBloqueadas(candidatas, maxX, maxY)
+            .filter(b => !bloqueadasAntes.has(`${b.x},${b.y}`));
+        if (novasBloqueadas.length > 0) {
+            const lista = novasBloqueadas.map(b => `(${b.x},${b.y})`).join(', ');
+            return res.status(400).json({ erro: `Não é possível construir aqui: ficaria(m) sem nenhum acesso livre à volta: ${lista}.` });
         }
 
         await pool.query(
@@ -238,12 +272,13 @@ app.post('/api/prateleiras/nova', verificarToken, exigirCargo('Gestor'), async (
 });
 
 
-// Rota para Apagar um Produto (só do próprio armazém)
+// Apaga uma unidade de produto arrumada (só se pertencer ao armazém do gestor
+// autenticado, para não apagar stock de outro armazém).
 app.delete('/api/produtos/:id', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     try {
         const { id } = req.params;
 
-        // 🔒 Só apaga se o produto for do armazém deste utilizador (vem do token)
+        // Só apaga se o produto for do armazém deste utilizador (vem do token)
         const [resultado] = await pool.query(
             'DELETE FROM Produtos WHERE ID = ? AND ArmazemID = ?',
             [id, req.utilizador.armazemID]
@@ -260,13 +295,14 @@ app.delete('/api/produtos/:id', verificarToken, exigirCargo('Gestor'), async (re
     }
 });
 
-// Rota para Apagar uma Prateleira (só do próprio armazém E só se estiver vazia)
+// Apaga uma prateleira, mas só se estiver vazia (sem produtos lá dentro) e
+// só se pertencer ao armazém do gestor autenticado.
 app.delete('/api/prateleiras/:id', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     try {
         const { id } = req.params;
         const armazemID = req.utilizador.armazemID;
 
-        // 🔒 Confirma que a prateleira é deste armazém (vem do token)
+        // Confirma que a prateleira é deste armazém (vem do token)
         const [prateleira] = await pool.query('SELECT ID FROM Prateleiras WHERE ID = ? AND ArmazemID = ?', [id, armazemID]);
         if (prateleira.length === 0) {
             return res.status(404).json({ erro: 'Prateleira não encontrada neste armazém.' });
@@ -287,7 +323,7 @@ app.delete('/api/prateleiras/:id', verificarToken, exigirCargo('Gestor'), async 
 
 // Buscar o tamanho guardado
 app.get('/api/config/tamanho', verificarToken, async (req, res) => {
-    const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
+    const armazemID = req.utilizador.armazemID; // do token, não do cliente (o utilizador não pode escolher o armazém de outra pessoa)
     const [configs] = await pool.query('SELECT * FROM Configuracoes WHERE ArmazemID = ?', [armazemID]);
     const tamanho = {};
     configs.forEach(c => tamanho[c.Chave] = c.Valor);
@@ -297,14 +333,17 @@ app.get('/api/config/tamanho', verificarToken, async (req, res) => {
 // Guardar novo tamanho
 app.post('/api/config/tamanho', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     const { largura, comprimento } = req.body;
-    const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
+    const armazemID = req.utilizador.armazemID; // do token, não do cliente (o utilizador não pode escolher o armazém de outra pessoa)
     await pool.query('UPDATE Configuracoes SET Valor = ? WHERE Chave = "largura" AND ArmazemID = ?', [largura, armazemID]);
     await pool.query('UPDATE Configuracoes SET Valor = ? WHERE Chave = "comprimento" AND ArmazemID = ?', [comprimento, armazemID]);
     res.json({ mensagem: 'Tamanho guardado!' });
 });
 
 
-// 🚪 LOGIN: Agora devolve a Chave do Armazém
+// Login: confirma email/senha e devolve um token JWT que o frontend guarda e
+// passa a enviar em todos os pedidos seguintes (cabeçalho Authorization).
+// Também diz ao frontend para onde redirecionar consoante o cargo
+// (Gestor -> backoffice, Operador -> app).
 app.post('/api/login', async (req, res) => {
     try {
         const { email, senha } = req.body;
@@ -340,7 +379,9 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// 📝 ROTA DE REGISTO (WEB): Cria um Armazém NOVO + a conta de Gestor desse armazém
+// Registo (backoffice web): cria um armazém novo e, na mesma operação, a
+// conta de Gestor responsável por ele. Corre tudo numa transação: ou fica
+// tudo criado (armazém + configurações + utilizador), ou nada fica gravado.
 app.post('/api/registo', async (req, res) => {
     const conn = await pool.getConnection();
     try {
@@ -396,7 +437,8 @@ app.post('/api/registo', async (req, res) => {
     }
 });
 
-// 🏬 LISTAR ARMAZÉNS: Usado pelo app Flutter para o operador escolher onde se liga
+// Lista todos os armazéns registados, para o ecrã de login da app do
+// operador (Flutter) mostrar um dropdown de escolha.
 app.get('/api/armazens', async (req, res) => {
     try {
         const [armazens] = await pool.query('SELECT ID, Nome, Cidade FROM Armazens ORDER BY Nome');
@@ -407,8 +449,10 @@ app.get('/api/armazens', async (req, res) => {
     }
 });
 
-// 👷 REGISTO DE OPERADOR (FLUTTER): Cria conta de Operador ligada a um armazém EXISTENTE
-// Vários operadores podem partilhar o mesmo ArmazemID.
+// Registo de operador (app Flutter): cria uma conta de Operador ligada a um
+// armazém já existente. Vários operadores podem partilhar o mesmo ArmazemID.
+// Exige o código de convite desse armazém, para impedir que qualquer pessoa
+// se registe num armazém que não é o seu.
 app.post('/api/operador/registo', async (req, res) => {
     try {
         const { nome, email, senha, armazemID, codigoConvite } = req.body;
@@ -417,7 +461,7 @@ app.post('/api/operador/registo', async (req, res) => {
             return res.status(400).json({ erro: 'Preenche todos os campos, escolhe um armazém e indica o código de convite (pede-o ao gestor).' });
         }
 
-        // 🔒 O armazém tem de existir E o código de convite tem de coincidir
+        // O armazém tem de existir E o código de convite tem de coincidir
         // (fecha o registo público: sem o código, não se cria conta neste armazém).
         const [armazem] = await pool.query('SELECT ID FROM Armazens WHERE ID = ? AND CodigoConvite = ?', [armazemID, String(codigoConvite).trim().toUpperCase()]);
         if (armazem.length === 0) {
@@ -445,10 +489,10 @@ app.post('/api/operador/registo', async (req, res) => {
 
 
 
-// 📊 TABELA DO GESTOR (Versão Final e Estável)
+// Histórico de encomendas deste armazém, para a tabela de vendas do backoffice.
 app.get('/api/gestor/encomendas', verificarToken, async (req, res) => {
     try {
-        const armazemId = req.utilizador.armazemID; // 🔒 do token, não do cliente
+        const armazemId = req.utilizador.armazemID; // do token, não do cliente (o utilizador não pode escolher o armazém de outra pessoa)
 
         // As encomendas vêm do simulador ERP (não há cliente individual associado).
         const sql = `
@@ -470,12 +514,15 @@ app.get('/api/gestor/encomendas', verificarToken, async (req, res) => {
 
 
 
-// 🛒 SIMULADOR: Receber um Carrinho de Compras (COM VALIDAÇÃO DE STOCK 🛡️)
+// Simulador de encomendas: recebe um carrinho (lista de artigo + quantidade)
+// e cria uma encomenda "Pendente" por cada linha, simulando pedidos que
+// chegariam de um sistema ERP real. Valida stock disponível (stock físico
+// menos o que já está reservado noutras encomendas pendentes) antes de aceitar.
 app.post('/api/encomendas/carrinho', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     const conn = await pool.getConnection();
     try {
         const { carrinho } = req.body;
-        const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
+        const armazemID = req.utilizador.armazemID; // do token, não do cliente (o utilizador não pode escolher o armazém de outra pessoa)
 
         await conn.beginTransaction();
 
@@ -530,7 +577,9 @@ app.post('/api/encomendas/carrinho', verificarToken, exigirCargo('Gestor'), asyn
     }
 });
 
-// 👷 BAIXA DE STOCK (Agora controla o Robô!)
+// Confirmação de recolha pelo operador: dá baixa ao stock físico (apaga as
+// unidades recolhidas), marca a encomenda como "Expedida" e recalcula onde o
+// robô virtual deve aparecer no radar (ponto de encontro com o operador).
 app.post('/api/operador/concluir', verificarToken, async (req, res) => {
     const conn = await pool.getConnection();
     try {
@@ -546,13 +595,13 @@ app.post('/api/operador/concluir', verificarToken, async (req, res) => {
 
         const { ProdutoNome, ArtigoID, Quantidade, ArmazemID } = enc[0];
 
-        // 🔒 Garante que a encomenda pertence ao armazém deste operador (vem do token)
+        // Garante que a encomenda pertence ao armazém deste operador (vem do token)
         if (ArmazemID !== req.utilizador.armazemID) {
             await conn.rollback();
             return res.status(403).json({ erro: 'Esta encomenda não pertence ao teu armazém.' });
         }
 
-        // 🔗 Localiza a unidade física pelo ArtigoID (FK), não pelo nome
+        // Localiza a unidade física pelo ArtigoID (chave estrangeira), não pelo nome
         const [posicao] = await conn.query(`
             SELECT p.PosX, p.PosY
             FROM Produtos prod
@@ -611,19 +660,22 @@ app.post('/api/operador/concluir', verificarToken, async (req, res) => {
     }
 });
 
-// 📡 ROTA DO RADAR: O site vai chamar isto de 2 em 2 segundos
+// Rota do radar: o backoffice chama isto a cada 2 segundos para saber onde
+// desenhar o robô no mapa. Devolve simplesmente o que estiver guardado em
+// memória (radarRobo) para este armazém.
 app.get('/api/robo/radar', verificarToken, (req, res) => {
-    const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
+    const armazemID = req.utilizador.armazemID; // do token, não do cliente (o utilizador não pode escolher o armazém de outra pessoa)
     const dados = radarRobo[armazemID] || null;
     res.json(dados);
 });
 
-// 🤝 COORDENAÇÃO HUMANO-MÁQUINA (Indústria 5.0)
-// Dado um produto, calcula o ponto de encontro entre o operador e o robô virtual
-// e as rotas de ambos (algoritmo exato BFS), com métricas de eficiência.
+// Coordenação humano-robô (Indústria 5.0): dado um produto ou uma posição no
+// mapa, calcula o ponto de encontro entre o operador e o robô virtual, as
+// rotas de ambos até lá (algoritmo BFS de procura em largura) e as métricas
+// de distância usadas na decisão humano-sozinho vs. humano+robô.
 app.get('/api/coordenacao/plano', verificarToken, async (req, res) => {
     try {
-        const armazemID = req.utilizador.armazemID; // 🔒 do token
+        const armazemID = req.utilizador.armazemID; // do token
         const produtoNome = req.query.produto;
 
         // 1. Determina a prateleira-alvo: pela posição (clique no mapa) ou pelo produto
@@ -692,7 +744,8 @@ app.get('/api/coordenacao/plano', verificarToken, async (req, res) => {
 });
 
 
-// 🔑 CÓDIGO DE CONVITE deste armazém, para o gestor partilhar com os operadores
+// Devolve o código de convite deste armazém, para o gestor partilhar com os
+// operadores (é o código que a rota /api/operador/registo exige).
 app.get('/api/armazem/codigo-convite', verificarToken, async (req, res) => {
     try {
         const [rows] = await pool.query('SELECT CodigoConvite FROM Armazens WHERE ID = ?', [req.utilizador.armazemID]);
@@ -702,8 +755,8 @@ app.get('/api/armazem/codigo-convite', verificarToken, async (req, res) => {
     }
 });
 
-// 🔍 PROCURAR ARTIGO: devolve os atributos (peso/dimensões/frágil) de um artigo já
-// existente neste armazém, para o formulário de entrada de stock não repor os
+// Procura um artigo pelo nome e devolve os seus atributos (peso/dimensões/
+// frágil) já guardados, para o formulário de entrada de stock não repor os
 // valores por omissão quando se arruma mais uma unidade de um artigo já conhecido.
 app.get('/api/artigos/procurar', verificarToken, async (req, res) => {
     try {
@@ -716,8 +769,9 @@ app.get('/api/artigos/procurar', verificarToken, async (req, res) => {
     }
 });
 
-// ⚙️ CONFIGURAÇÃO DO ARMAZÉM: largura do corredor (usada na recomendação de
-// robô) e, opcionalmente, o robô fixado manualmente pelo gestor.
+// Configuração do armazém: largura do corredor (usada na recomendação de
+// robô) e, opcionalmente, o robô fixado manualmente pelo gestor, além das
+// dimensões físicas das prateleiras.
 app.get('/api/armazem/config', verificarToken, async (req, res) => {
     try {
         const [rows] = await pool.query(
@@ -776,7 +830,8 @@ app.post('/api/armazem/config', verificarToken, exigirCargo('Gestor'), async (re
     }
 });
 
-// 🤖 CATÁLOGO DE ROBÔS: tipos disponíveis, com as suas especificações reais
+// Catálogo de robôs: lista os tipos disponíveis com as suas especificações
+// reais (capacidade de carga, velocidade, dimensões, corredor mínimo, etc.).
 app.get('/api/robos/tipos', verificarToken, async (req, res) => {
     try {
         const tipos = await listarTiposRobo(pool);
@@ -786,8 +841,9 @@ app.get('/api/robos/tipos', verificarToken, async (req, res) => {
     }
 });
 
-// 🤖 RECOMENDAÇÃO DE ROBÔ (SAD): dado o layout deste armazém (largura do
-// corredor) e as tarefas pendentes, recomenda o tipo de robô mais adequado.
+// Recomendação de robô (Sistema de Apoio à Decisão): dado o layout deste
+// armazém (largura do corredor) e as tarefas pendentes, recomenda
+// automaticamente o tipo de robô mais adequado do catálogo.
 app.get('/api/robos/recomendar', verificarToken, async (req, res) => {
     try {
         const armazemID = req.utilizador.armazemID;
@@ -805,9 +861,10 @@ app.get('/api/robos/recomendar', verificarToken, async (req, res) => {
     }
 });
 
-// 🧮 PLANEAMENTO EM LOTE: corre os 3 algoritmos (exato, guloso, meta-heurística)
-// sobre as tarefas pendentes deste armazém e devolve os resultados lado a
-// lado, para comparar tempo de cálculo e qualidade da solução (relatório, cap. 13).
+// Planeamento em lote: corre os 3 algoritmos de otimização (exato, guloso,
+// meta-heurística) sobre todas as tarefas pendentes deste armazém e devolve
+// os resultados lado a lado, para comparar tempo de cálculo e qualidade da
+// solução (ver capítulo de algoritmos no relatório).
 app.get('/api/planeamento/otimizar', verificarToken, async (req, res) => {
     try {
         const armazemID = req.utilizador.armazemID;
@@ -844,16 +901,45 @@ app.get('/api/planeamento/otimizar', verificarToken, async (req, res) => {
     }
 });
 
-// 📂 IMPORTAR MAPA: Substitui TODA a planta do armazém (apaga a antiga primeiro)
+// Importar mapa a partir de um ficheiro JSON: substitui TODA a planta do
+// armazém (apaga as prateleiras e produtos antigos e cria as novas a partir
+// da lista recebida). Valida o layout completo antes de mexer em qualquer
+// coisa na base de dados, para nunca ficar com o armazém a meio de uma troca.
 app.post('/api/armazem/importar', verificarToken, exigirCargo('Gestor'), async (req, res) => {
     const conn = await pool.getConnection();
     try {
         const { prateleiras } = req.body;
-        const armazemID = req.utilizador.armazemID; // 🔒 do token, não do cliente
+        const armazemID = req.utilizador.armazemID; // do token, não do cliente (o utilizador não pode escolher o armazém de outra pessoa)
 
         // Verifica se o que foi enviado é mesmo uma lista
         if (!Array.isArray(prateleiras)) {
             return res.status(400).json({ erro: 'Formato inválido. O ficheiro deve conter uma lista de prateleiras.' });
+        }
+
+        // Valida ANTES de apagar o que já existe: nenhuma prateleira do ficheiro
+        // pode ficar sem nenhuma célula livre à volta, senão fica impossível de
+        // recolher depois de arrumada lá. Ao contrário da criação manual de uma
+        // prateleira (que só compara antes/depois), aqui o layout inteiro é novo,
+        // por isso qualquer prateleira bloqueada no resultado final é rejeitada.
+        const semDuplicados = [];
+        const vistasValidacao = new Set();
+        for (const plat of prateleiras) {
+            const chave = `${plat.posX},${plat.posY}`;
+            if (vistasValidacao.has(chave)) continue;
+            vistasValidacao.add(chave);
+            semDuplicados.push({ PosX: plat.posX, PosY: plat.posY });
+        }
+        const [configsValidacao] = await pool.query('SELECT * FROM Configuracoes WHERE ArmazemID = ?', [armazemID]);
+        let maxXValidacao = semDuplicados.reduce((m, p) => Math.max(m, p.PosX), 1);
+        let maxYValidacao = semDuplicados.reduce((m, p) => Math.max(m, p.PosY), 1);
+        configsValidacao.forEach(c => {
+            if (c.Chave === 'largura') maxXValidacao = Math.max(maxXValidacao, c.Valor);
+            if (c.Chave === 'comprimento') maxYValidacao = Math.max(maxYValidacao, c.Valor);
+        });
+        const bloqueadasImportacao = prateleirasBloqueadas(semDuplicados, maxXValidacao, maxYValidacao);
+        if (bloqueadasImportacao.length > 0) {
+            const lista = bloqueadasImportacao.map(b => `(${b.x},${b.y})`).join(', ');
+            return res.status(400).json({ erro: `Planta rejeitada: uma ou mais prateleiras ficariam sem acesso. Ajuste o layout e tenta de novo.` });
         }
 
         await conn.beginTransaction();
